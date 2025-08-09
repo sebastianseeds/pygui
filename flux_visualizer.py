@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QSlider, QLabel, QDoubleSpinBox, QFileDialog, 
     QMessageBox, QProgressBar, QGroupBox, QFormLayout, QSpinBox,
-    QSplitter, QFrame
+    QSplitter, QFrame, QComboBox, QCheckBox
 )
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -240,6 +240,8 @@ class ElectronFluxVisualizer(QMainWindow):
         
         self.setup_ui()
         self.setup_vtk()
+
+        self.setup_visualization_controls()
         
     def setup_ui(self):
         """Setup the user interface"""
@@ -265,7 +267,7 @@ class ElectronFluxVisualizer(QMainWindow):
         
         # Right panel - controls
         control_panel = QWidget()
-        control_layout = QVBoxLayout(control_panel)
+        self.control_layout = QVBoxLayout(control_panel)
         
         # File loading group
         file_group = QGroupBox("Data Loading")
@@ -277,7 +279,7 @@ class ElectronFluxVisualizer(QMainWindow):
         file_layout.addRow(self.load_vtk_button)
         file_layout.addRow(self.load_orbit_button)
         
-        control_layout.addWidget(file_group)
+        self.control_layout.addWidget(file_group)
         
         # Animation controls group
         anim_group = QGroupBox("Animation Controls")
@@ -313,7 +315,7 @@ class ElectronFluxVisualizer(QMainWindow):
         speed_layout.addRow("Animation Speed:", self.speed_spinbox)
         anim_layout.addLayout(speed_layout)
         
-        control_layout.addWidget(anim_group)
+        self.control_layout.addWidget(anim_group)
         
         # Analysis parameters group
         analysis_group = QGroupBox("Analysis Parameters")
@@ -326,7 +328,7 @@ class ElectronFluxVisualizer(QMainWindow):
         self.cross_section_spinbox.setSuffix(" m")
         
         analysis_layout.addRow("Cross Section Radius:", self.cross_section_spinbox)
-        control_layout.addWidget(analysis_group)
+        self.control_layout.addWidget(analysis_group)
         
         # Plot windows group
         plots_group = QGroupBox("Plot Windows")
@@ -340,19 +342,19 @@ class ElectronFluxVisualizer(QMainWindow):
         plots_layout.addWidget(self.show_spectrum_button)
         plots_layout.addWidget(self.show_flux_time_button)
         
-        control_layout.addWidget(plots_group)
+        self.control_layout.addWidget(plots_group)
         
         # Status
         self.status_label = QLabel("Ready - Load VTK data and orbital CSV to begin")
         self.status_label.setWordWrap(True)
-        control_layout.addWidget(self.status_label)
+        self.control_layout.addWidget(self.status_label)
         
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        control_layout.addWidget(self.progress_bar)
+        self.control_layout.addWidget(self.progress_bar)
         
-        control_layout.addStretch()
+        self.control_layout.addStretch()
         
         control_panel.setMaximumWidth(350)
         splitter.addWidget(control_panel)
@@ -377,6 +379,591 @@ class ElectronFluxVisualizer(QMainWindow):
         
         # Create Earth representation (optional)
         self.create_earth_representation()
+
+    def setup_visualization_controls(self):
+        """Add ParaView-inspired visualization controls to the UI"""
+        
+        # Add to the control panel after analysis parameters
+        viz_group = QGroupBox("Field Visualization")
+        viz_layout = QVBoxLayout(viz_group)
+        
+        # Visualization mode selection
+        mode_layout = QFormLayout()
+        self.viz_mode_combo = QComboBox()
+        self.viz_mode_combo.addItems([
+            "Volume Rendering",
+            "Isosurfaces", 
+            "Point Cloud",
+            "Wireframe",
+            "Surface with Edges",
+            "Slice Planes"
+        ])
+        self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
+        mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
+        
+        # Opacity control
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(40)
+        self.opacity_slider.valueChanged.connect(self.update_opacity)
+        self.opacity_label = QLabel("40%")
+        opacity_layout = QHBoxLayout()
+        opacity_layout.addWidget(self.opacity_slider)
+        opacity_layout.addWidget(self.opacity_label)
+        mode_layout.addRow("Opacity:", opacity_layout)
+        
+        # Threshold controls
+        self.threshold_enabled = QCheckBox("Enable Thresholding")
+        self.threshold_enabled.toggled.connect(self.toggle_threshold)
+        
+        self.threshold_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.threshold_min_slider.setRange(0, 100)
+        self.threshold_min_slider.setValue(10)
+        self.threshold_min_slider.valueChanged.connect(self.update_threshold)
+        
+        self.threshold_max_slider = QSlider(Qt.Orientation.Horizontal) 
+        self.threshold_max_slider.setRange(0, 100)
+        self.threshold_max_slider.setValue(90)
+        self.threshold_max_slider.valueChanged.connect(self.update_threshold)
+        
+        threshold_layout = QFormLayout()
+        threshold_layout.addRow(self.threshold_enabled)
+        threshold_layout.addRow("Min Threshold:", self.threshold_min_slider)
+        threshold_layout.addRow("Max Threshold:", self.threshold_max_slider)
+        
+        # Isosurface controls
+        self.isosurface_enabled = QCheckBox("Show Isosurfaces")
+        self.isosurface_enabled.toggled.connect(self.toggle_isosurfaces)
+        
+        self.num_isosurfaces_spin = QSpinBox()
+        self.num_isosurfaces_spin.setRange(1, 10)
+        self.num_isosurfaces_spin.setValue(3)
+        self.num_isosurfaces_spin.valueChanged.connect(self.update_isosurfaces)
+        
+        iso_layout = QFormLayout()
+        iso_layout.addRow(self.isosurface_enabled)
+        iso_layout.addRow("Number of Isosurfaces:", self.num_isosurfaces_spin)
+        
+        # Color map selection
+        self.colormap_combo = QComboBox()
+        self.colormap_combo.addItems([
+            "Blue to Red",
+            "Viridis", 
+            "Plasma",
+            "Cool to Warm",
+            "Rainbow",
+            "Grayscale"
+        ])
+        self.colormap_combo.currentTextChanged.connect(self.change_colormap)
+        mode_layout.addRow("Color Map:", self.colormap_combo)
+        
+        # Add all layouts to group
+        viz_layout.addLayout(mode_layout)
+        viz_layout.addLayout(threshold_layout)
+        viz_layout.addLayout(iso_layout)
+        
+        # Insert into main control layout (after analysis_group)
+        control_layout = self.findChild(QVBoxLayout)  # Find the main control layout
+        # Insert before the plots group
+        plots_group_index = None
+        for i in range(control_layout.count()):
+            widget = control_layout.itemAt(i).widget()
+            if isinstance(widget, QGroupBox) and widget.title() == "Plot Windows":
+                plots_group_index = i
+                break
+        
+        if plots_group_index:
+            control_layout.insertWidget(plots_group_index, viz_group)
+        else:
+            control_layout.addWidget(viz_group)
+
+    def change_visualization_mode(self, mode):
+        """Change the field visualization mode - IMPROVED ERROR HANDLING"""
+        if not self.vtk_data:
+            print("No VTK data loaded")
+            return
+            
+        print(f"Changing visualization mode to: {mode}")
+        
+        try:
+            # Remove existing actors/volumes
+            if hasattr(self, 'field_actor') and self.field_actor:
+                self.renderer.RemoveActor(self.field_actor)
+                self.field_actor = None
+                
+            if hasattr(self, 'volume_actor') and self.volume_actor:
+                self.renderer.RemoveVolume(self.volume_actor)
+                self.volume_actor = None
+                
+            if hasattr(self, 'slice_actors'):
+                for actor in self.slice_actors:
+                    self.renderer.RemoveActor(actor)
+                self.slice_actors = []
+                
+            # Apply new visualization mode
+            if mode == "Volume Rendering":
+                self.setup_volume_rendering()
+            elif mode == "Isosurfaces":
+                self.setup_isosurface_rendering()
+            elif mode == "Point Cloud":
+                self.setup_point_cloud_rendering()
+            elif mode == "Wireframe":
+                self.setup_wireframe_rendering()
+            elif mode == "Surface with Edges":
+                self.setup_surface_with_edges()
+            elif mode == "Slice Planes":
+                self.setup_slice_planes()
+            else:
+                # Fallback to original visualization
+                self.setup_field_visualization()
+                
+            self.vtk_widget.GetRenderWindow().Render()
+            print(f"Visualization mode changed to: {mode}")
+            
+        except Exception as e:
+            print(f"Error changing visualization mode: {e}")
+            # Fallback to basic field visualization
+            self.setup_field_visualization()
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def setup_volume_rendering(self):
+        """Setup volume rendering for 3D scalar field - FIXED VERSION"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up volume rendering...")
+        
+        try:
+            # For volume rendering, we need image data
+            if not isinstance(self.vtk_data, vtk.vtkImageData):
+                # Create a volume from point cloud using vtkGaussianSplatter
+                splatter = vtk.vtkGaussianSplatter()
+                splatter.SetInputData(self.vtk_data)
+                splatter.SetSampleDimensions(40, 40, 40)  # Reduced for performance
+                
+                # Calculate bounds for radius
+                bounds = self.vtk_data.GetBounds()
+                max_extent = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
+                radius = max_extent / 20.0  # Adaptive radius
+                
+                splatter.SetRadius(radius)
+                splatter.SetExponentFactor(-5)  # Controls falloff
+                splatter.Update()
+                volume_data = splatter.GetOutput()
+                
+                if volume_data.GetNumberOfPoints() == 0:
+                    print("Warning: Volume splatter produced no data")
+                    return
+            else:
+                volume_data = self.vtk_data
+                
+            # Volume mapper - try GPU first, fallback to CPU
+            try:
+                volume_mapper = vtk.vtkGPUVolumeRayCastMapper()
+                print("Using GPU volume mapper")
+            except:
+                volume_mapper = vtk.vtkFixedPointVolumeRayCastMapper()
+                print("Using CPU volume mapper")
+                
+            volume_mapper.SetInputData(volume_data)
+            
+            # Volume properties
+            volume_property = vtk.vtkVolumeProperty()
+            volume_property.ShadeOn()
+            volume_property.SetInterpolationTypeToLinear()
+            
+            # Color transfer function
+            color_func = vtk.vtkColorTransferFunction()
+            scalar_range = volume_data.GetScalarRange()
+            
+            if scalar_range[1] > scalar_range[0]:  # Valid range
+                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)  # Dark blue
+                color_func.AddRGBPoint(scalar_range[1] * 0.3, 0.0, 0.0, 1.0)  # Blue
+                color_func.AddRGBPoint(scalar_range[1] * 0.6, 0.0, 1.0, 0.0)  # Green
+                color_func.AddRGBPoint(scalar_range[1] * 0.9, 1.0, 1.0, 0.0)  # Yellow
+                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)  # Red
+            
+            # Opacity transfer function
+            opacity_func = vtk.vtkPiecewiseFunction()
+            if scalar_range[1] > scalar_range[0]:
+                opacity_func.AddPoint(scalar_range[0], 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.1, 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.1)
+                opacity_func.AddPoint(scalar_range[1] * 0.6, 0.3)
+                opacity_func.AddPoint(scalar_range[1], 0.8)
+            
+            volume_property.SetColor(color_func)
+            volume_property.SetScalarOpacity(opacity_func)
+            
+            # Create volume
+            if hasattr(self, 'volume_actor'):
+                self.renderer.RemoveVolume(self.volume_actor)
+                
+            self.volume_actor = vtk.vtkVolume()
+            self.volume_actor.SetMapper(volume_mapper)
+            self.volume_actor.SetProperty(volume_property)
+            
+            self.renderer.AddVolume(self.volume_actor)
+            
+            print("Volume rendering setup complete")
+            
+        except Exception as e:
+            print(f"Volume rendering failed: {e}")
+            # Fallback to point cloud
+            self.setup_point_cloud_rendering()
+
+    def setup_isosurface_rendering(self):
+        """Setup isosurface rendering with multiple contour levels - FIXED VERSION"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up isosurface rendering...")
+        
+        try:
+            # Create contour filter
+            contour = vtk.vtkContourFilter()
+            contour.SetInputData(self.vtk_data)
+            
+            # Generate isosurface values
+            scalar_range = self.vtk_data.GetScalarRange()
+            num_contours = self.num_isosurfaces_spin.value()
+            
+            if scalar_range[1] > scalar_range[0]:
+                contour.GenerateValues(num_contours, 
+                                      scalar_range[1] * 0.2,  # Start at 20% of max
+                                      scalar_range[1] * 0.9)  # End at 90% of max
+            contour.Update()
+            
+            if contour.GetOutput().GetNumberOfPoints() == 0:
+                print("Warning: No isosurfaces generated")
+                return
+            
+            # Create mapper and actor
+            contour_mapper = vtk.vtkPolyDataMapper()
+            contour_mapper.SetInputConnection(contour.GetOutputPort())
+            contour_mapper.SetScalarRange(scalar_range)
+            
+            # Setup lookup table
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            contour_mapper.SetLookupTable(lut)
+            
+            if hasattr(self, 'field_actor'):
+                self.renderer.RemoveActor(self.field_actor)
+                
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(contour_mapper)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            
+            print(f"Created {num_contours} isosurfaces")
+            
+        except Exception as e:
+            print(f"Isosurface rendering failed: {e}")
+            # Fallback to point cloud
+            self.setup_point_cloud_rendering()
+
+    def setup_point_cloud_rendering(self):
+        """Setup point cloud rendering with spherical glyphs"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up point cloud rendering...")
+        
+        # Create sphere glyphs
+        sphere = vtk.vtkSphereSource()
+        sphere.SetRadius(100)  # 100 km radius
+        sphere.SetThetaResolution(8)
+        sphere.SetPhiResolution(8)
+        
+        glyph = vtk.vtkGlyph3D()
+        glyph.SetInputData(self.vtk_data)
+        glyph.SetSourceConnection(sphere.GetOutputPort())
+        glyph.SetScaleModeToScaleByScalar()
+        glyph.SetScaleFactor(0.1)
+        glyph.Update()
+        
+        # Create mapper
+        glyph_mapper = vtk.vtkPolyDataMapper()
+        glyph_mapper.SetInputConnection(glyph.GetOutputPort())
+        glyph_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
+        
+        # Setup lookup table
+        lut = self.create_lookup_table(self.colormap_combo.currentText())
+        glyph_mapper.SetLookupTable(lut)
+        
+        self.field_actor = vtk.vtkActor()
+        self.field_actor.SetMapper(glyph_mapper)
+        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+        
+        self.renderer.AddActor(self.field_actor)
+
+    def setup_wireframe_rendering(self):
+        """Setup wireframe rendering"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up wireframe rendering...")
+        
+        # Extract surface
+        surface = vtk.vtkDataSetSurfaceFilter()
+        surface.SetInputData(self.vtk_data)
+        surface.Update()
+        
+        # Create mapper
+        wireframe_mapper = vtk.vtkPolyDataMapper()
+        wireframe_mapper.SetInputConnection(surface.GetOutputPort())
+        wireframe_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
+        
+        # Setup lookup table
+        lut = self.create_lookup_table(self.colormap_combo.currentText())
+        wireframe_mapper.SetLookupTable(lut)
+        
+        self.field_actor = vtk.vtkActor()
+        self.field_actor.SetMapper(wireframe_mapper)
+        self.field_actor.GetProperty().SetRepresentationToWireframe()
+        self.field_actor.GetProperty().SetLineWidth(1.0)
+        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+        
+        self.renderer.AddActor(self.field_actor)
+
+    def setup_surface_with_edges(self):
+        """Setup surface rendering with edge display"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up surface with edges...")
+        
+        # Extract surface
+        surface = vtk.vtkDataSetSurfaceFilter()
+        surface.SetInputData(self.vtk_data)
+        surface.Update()
+        
+        # Create mapper
+        surface_mapper = vtk.vtkPolyDataMapper()
+        surface_mapper.SetInputConnection(surface.GetOutputPort())
+        surface_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
+        
+        # Setup lookup table
+        lut = self.create_lookup_table(self.colormap_combo.currentText())
+        surface_mapper.SetLookupTable(lut)
+        
+        self.field_actor = vtk.vtkActor()
+        self.field_actor.SetMapper(surface_mapper)
+        self.field_actor.GetProperty().SetRepresentationToSurface()
+        self.field_actor.GetProperty().EdgeVisibilityOn()
+        self.field_actor.GetProperty().SetEdgeColor(0.2, 0.2, 0.2)
+        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+        
+        self.renderer.AddActor(self.field_actor)
+
+    def setup_slice_planes(self):
+        """Setup slice plane visualization"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up slice planes...")
+        
+        # Create three orthogonal slice planes
+        planes = []
+        
+        # XY plane (Z = 0)
+        plane_xy = vtk.vtkPlane()
+        plane_xy.SetOrigin(0, 0, 0)
+        plane_xy.SetNormal(0, 0, 1)
+        planes.append(plane_xy)
+        
+        # XZ plane (Y = 0) 
+        plane_xz = vtk.vtkPlane()
+        plane_xz.SetOrigin(0, 0, 0)
+        plane_xz.SetNormal(0, 1, 0)
+        planes.append(plane_xz)
+        
+        # YZ plane (X = 0)
+        plane_yz = vtk.vtkPlane()
+        plane_yz.SetOrigin(0, 0, 0)
+        plane_yz.SetNormal(1, 0, 0)
+        planes.append(plane_yz)
+        
+        self.slice_actors = []
+        
+        for i, plane in enumerate(planes):
+            # Create cutter
+            cutter = vtk.vtkCutter()
+            cutter.SetInputData(self.vtk_data)
+            cutter.SetCutFunction(plane)
+            cutter.Update()
+            
+            # Create mapper
+            slice_mapper = vtk.vtkPolyDataMapper()
+            slice_mapper.SetInputConnection(cutter.GetOutputPort())
+            slice_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
+            
+            # Setup lookup table
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            slice_mapper.SetLookupTable(lut)
+            
+            # Create actor
+            slice_actor = vtk.vtkActor()
+            slice_actor.SetMapper(slice_mapper)
+            slice_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.slice_actors.append(slice_actor)
+            self.renderer.AddActor(slice_actor)
+
+    def create_lookup_table(self, colormap_name):
+        """Create lookup table based on colormap name"""
+        lut = vtk.vtkLookupTable()
+        lut.SetNumberOfTableValues(256)
+        
+        if colormap_name == "Blue to Red":
+            lut.SetHueRange(0.667, 0.0)  # Blue to red
+        elif colormap_name == "Viridis":
+            # Approximate viridis colormap
+            lut.SetHueRange(0.7, 0.15)
+            lut.SetSaturationRange(1.0, 0.7)
+        elif colormap_name == "Plasma":
+            # Approximate plasma colormap  
+            lut.SetHueRange(0.8, 0.05)
+            lut.SetSaturationRange(1.0, 1.0)
+        elif colormap_name == "Cool to Warm":
+            lut.SetHueRange(0.667, 0.0)
+            lut.SetSaturationRange(1.0, 1.0)
+        elif colormap_name == "Rainbow":
+            lut.SetHueRange(0.0, 0.667)
+        elif colormap_name == "Grayscale":
+            lut.SetHueRange(0.0, 0.0)
+            lut.SetSaturationRange(0.0, 0.0)
+            
+        lut.SetValueRange(0.0, 1.0)
+        lut.Build()
+        return lut
+
+    def update_opacity(self, value):
+        """Update field visualization opacity"""
+        opacity = value / 100.0
+        self.opacity_label.setText(f"{value}%")
+        
+        if hasattr(self, 'field_actor') and self.field_actor:
+            self.field_actor.GetProperty().SetOpacity(opacity)
+            
+        if hasattr(self, 'volume_actor') and self.volume_actor:
+            # Update volume opacity (more complex)
+            volume_property = self.volume_actor.GetProperty()
+            opacity_func = volume_property.GetScalarOpacity()
+            # Scale existing opacity function
+            
+        if hasattr(self, 'slice_actors'):
+            for actor in self.slice_actors:
+                actor.GetProperty().SetOpacity(opacity)
+                
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def toggle_threshold(self, enabled):
+        """Toggle threshold filtering"""
+        if enabled:
+            self.update_threshold()
+        else:
+            # Remove threshold and restore full data
+            self.change_visualization_mode(self.viz_mode_combo.currentText())
+
+    def update_threshold(self):
+        """Update threshold values with correct VTK API"""
+        if not self.threshold_enabled.isChecked() or not self.vtk_data:
+            return
+            
+        scalar_range = self.vtk_data.GetScalarRange()
+        min_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_min_slider.value() / 100.0)
+        max_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_max_slider.value() / 100.0)
+        
+        print(f"Applying threshold: {min_val:.2e} to {max_val:.2e}")
+        
+        # Apply threshold filter with correct VTK 9+ API
+        threshold = vtk.vtkThreshold()
+        threshold.SetInputData(self.vtk_data)
+        
+        # Use the correct modern VTK threshold API
+        threshold.SetLowerThreshold(min_val)
+        threshold.SetUpperThreshold(max_val)
+        threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
+        threshold.Update()
+        
+        # Store the thresholded data temporarily
+        self.thresholded_data = threshold.GetOutput()
+        
+        # Re-apply current visualization mode with thresholded data
+        self.apply_visualization_to_data(self.thresholded_data)
+
+    def apply_visualization_to_data(self, data):
+        """Apply current visualization mode to given data"""
+        if not data:
+            return
+            
+        # Remove existing actors
+        if hasattr(self, 'field_actor') and self.field_actor:
+            self.renderer.RemoveActor(self.field_actor)
+        if hasattr(self, 'volume_actor') and self.volume_actor:
+            self.renderer.RemoveVolume(self.volume_actor)
+        if hasattr(self, 'slice_actors'):
+            for actor in self.slice_actors:
+                self.renderer.RemoveActor(actor)
+            
+        # Temporarily replace vtk_data
+        original_data = self.vtk_data
+        self.vtk_data = data
+        
+        # Apply current visualization mode
+        current_mode = self.viz_mode_combo.currentText()
+        
+        if current_mode == "Volume Rendering":
+            self.setup_volume_rendering()
+        elif current_mode == "Isosurfaces":
+            self.setup_isosurface_rendering()
+        elif current_mode == "Point Cloud":
+            self.setup_point_cloud_rendering()
+        elif current_mode == "Wireframe":
+            self.setup_wireframe_rendering()
+        elif current_mode == "Surface with Edges":
+            self.setup_surface_with_edges()
+        elif current_mode == "Slice Planes":
+            self.setup_slice_planes()
+        else:
+            # Default to original field visualization
+            self.setup_field_visualization()
+            
+        # Restore original data reference
+        self.vtk_data = original_data
+        
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def toggle_isosurfaces(self, enabled):
+        """Toggle isosurface display"""
+        if enabled and self.viz_mode_combo.currentText() != "Isosurfaces":
+            self.viz_mode_combo.setCurrentText("Isosurfaces")
+        elif not enabled and hasattr(self, 'isosurface_actors'):
+            for actor in self.isosurface_actors:
+                self.renderer.RemoveActor(actor)
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def update_isosurfaces(self):
+        """Update number of isosurfaces"""
+        if (self.viz_mode_combo.currentText() == "Isosurfaces" and 
+            self.isosurface_enabled.isChecked()):
+            self.setup_isosurface_rendering()
+
+    def change_colormap(self, colormap_name):
+        """Change the color mapping"""
+        if hasattr(self, 'field_actor') and self.field_actor:
+            mapper = self.field_actor.GetMapper()
+            if mapper:
+                lut = self.create_lookup_table(colormap_name)
+                mapper.SetLookupTable(lut)
+                
+                # Update scalar bar
+                if hasattr(self, 'scalar_bar'):
+                    self.scalar_bar.SetLookupTable(lut)
+                    
+        self.vtk_widget.GetRenderWindow().Render()
         
     def create_earth_representation(self):
         """Create a simple Earth sphere for reference"""
