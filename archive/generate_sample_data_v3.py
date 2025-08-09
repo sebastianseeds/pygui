@@ -403,10 +403,6 @@ def main():
     print("\n" + "-" * 50)
     print("Generating orbital data...")
     create_sample_orbital_data("orbit_leo.csv", "LEO")
-    print()
-    create_sample_orbital_data("orbit_meo.csv", "MEO")
-    print()
-    create_sample_orbital_data("orbit_geo.csv", "GEO")
     
     total_time = time.time() - overall_start
     
@@ -418,8 +414,6 @@ def main():
     print("  • flux_field_unstructured.vtu - XML unstructured grid")  
     print("  • flux_field_legacy.vtk       - Legacy VTK format")
     print("  • orbit_leo.csv               - LEO satellite trajectory")
-    print("  • orbit_meo.csv               - MEO satellite trajectory")
-    print("  • orbit_geo.csv               - GEO satellite trajectory")
     
     print("\nTo test:")
     print("  1. python flux_visualizer.py")
