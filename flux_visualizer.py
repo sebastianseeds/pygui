@@ -242,6 +242,97 @@ class ElectronFluxVisualizer(QMainWindow):
         self.setup_vtk()
 
         self.setup_visualization_controls()
+
+
+    def debug_renderer_state(self):
+        """Debug method to check renderer state"""
+        print("\n=== RENDERER DEBUG INFO ===")
+        
+        # Check actors
+        actors = self.renderer.GetActors()
+        actors.InitTraversal()
+        actor_count = 0
+        while actors.GetNextActor():
+            actor_count += 1
+        print(f"Total actors: {actor_count}")
+        
+        # Check volumes
+        volumes = self.renderer.GetVolumes()
+        volumes.InitTraversal()
+        volume_count = 0
+        while volumes.GetNextVolume():
+            volume_count += 1
+        print(f"Total volumes: {volume_count}")
+        
+        # Check view props
+        props = self.renderer.GetViewProps()
+        props.InitTraversal()
+        prop_count = 0
+        while props.GetNextProp():
+            prop_count += 1
+        print(f"Total view props: {prop_count}")
+        
+        # Camera info
+        camera = self.renderer.GetActiveCamera()
+        print(f"Camera position: {camera.GetPosition()}")
+        print(f"Camera focal point: {camera.GetFocalPoint()}")
+        print(f"Camera view up: {camera.GetViewUp()}")
+        
+        # Data bounds if available
+        if hasattr(self, 'vtk_data') and self.vtk_data:
+            bounds = self.vtk_data.GetBounds()
+            print(f"Data bounds: X({bounds[0]:.1f}, {bounds[1]:.1f}) Y({bounds[2]:.1f}, {bounds[3]:.1f}) Z({bounds[4]:.1f}, {bounds[5]:.1f})")
+        
+        print("=========================\n")
+
+    def test_simple_visualization(self):
+        """Test method to create a simple visible object"""
+        print("=== TESTING SIMPLE VISUALIZATION ===")
+        
+        if not self.vtk_data:
+            print("No VTK data available")
+            return
+        
+        try:
+            # Clear everything first
+            #self.clear_field_visualization()
+            
+            # Create a simple sphere at the center of the data
+            bounds = self.vtk_data.GetBounds()
+            center = [(bounds[1]+bounds[0])/2, (bounds[3]+bounds[2])/2, (bounds[5]+bounds[4])/2]
+            radius = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4]) / 10
+            
+            print(f"Creating test sphere at {center} with radius {radius}")
+            
+            sphere = vtk.vtkSphereSource()
+            sphere.SetCenter(center)
+            sphere.SetRadius(radius)
+            sphere.SetThetaResolution(20)
+            sphere.SetPhiResolution(20)
+            
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(sphere.GetOutputPort())
+            
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(1.0, 0.0, 0.0)  # Bright red
+            actor.GetProperty().SetOpacity(1.0)
+            
+            self.renderer.AddActor(actor)
+            
+            # Store as field actor for cleanup
+            self.field_actor = actor
+            
+            # Reset camera and render
+            self.renderer.ResetCamera()
+            self.vtk_widget.GetRenderWindow().Render()
+            
+            print("Test sphere created and rendered")
+            
+        except Exception as e:
+            print(f"Error in test visualization: {e}")
+            import traceback
+            traceback.print_exc()
         
     def setup_ui(self):
         """Setup the user interface"""
@@ -343,6 +434,17 @@ class ElectronFluxVisualizer(QMainWindow):
         plots_layout.addWidget(self.show_flux_time_button)
         
         self.control_layout.addWidget(plots_group)
+
+        debug_group = QGroupBox("Debug Controls")
+        debug_layout = QVBoxLayout(debug_group)
+        
+        self.debug_button = QPushButton("Debug Renderer State")
+        self.debug_button.clicked.connect(self.debug_renderer_state)
+        debug_layout.addWidget(self.debug_button)
+        
+        self.test_viz_button = QPushButton("Test Simple Visualization")
+        self.test_viz_button.clicked.connect(self.test_simple_visualization)
+        debug_layout.addWidget(self.test_viz_button)
         
         # Status
         self.status_label = QLabel("Ready - Load VTK data and orbital CSV to begin")
@@ -381,9 +483,22 @@ class ElectronFluxVisualizer(QMainWindow):
         self.create_earth_representation()
 
     def setup_visualization_controls(self):
-        """Add ParaView-inspired visualization controls to the UI"""
+        """Add ParaView-inspired visualization controls - FIXED VERSION"""
         
-        # Add to the control panel after analysis parameters
+        # Find the control layout
+        control_layout = None
+        for i in range(self.control_layout.count()):
+            item = self.control_layout.itemAt(i)
+            if item and isinstance(item.widget(), QGroupBox) and item.widget().title() == "Analysis Parameters":
+                control_layout = self.control_layout
+                insert_index = i + 1
+                break
+        
+        if not control_layout:
+            control_layout = self.control_layout
+            insert_index = -1
+        
+        # Create visualization controls group
         viz_group = QGroupBox("Field Visualization")
         viz_layout = QVBoxLayout(viz_group)
         
@@ -398,51 +513,21 @@ class ElectronFluxVisualizer(QMainWindow):
             "Surface with Edges",
             "Slice Planes"
         ])
+        self.viz_mode_combo.setCurrentText("Point Cloud")  # Safe default
         self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
         mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
         
         # Opacity control
+        opacity_layout = QHBoxLayout()
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(0, 100)
         self.opacity_slider.setValue(40)
         self.opacity_slider.valueChanged.connect(self.update_opacity)
         self.opacity_label = QLabel("40%")
-        opacity_layout = QHBoxLayout()
+        self.opacity_label.setMinimumWidth(40)
         opacity_layout.addWidget(self.opacity_slider)
         opacity_layout.addWidget(self.opacity_label)
         mode_layout.addRow("Opacity:", opacity_layout)
-        
-        # Threshold controls
-        self.threshold_enabled = QCheckBox("Enable Thresholding")
-        self.threshold_enabled.toggled.connect(self.toggle_threshold)
-        
-        self.threshold_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.threshold_min_slider.setRange(0, 100)
-        self.threshold_min_slider.setValue(10)
-        self.threshold_min_slider.valueChanged.connect(self.update_threshold)
-        
-        self.threshold_max_slider = QSlider(Qt.Orientation.Horizontal) 
-        self.threshold_max_slider.setRange(0, 100)
-        self.threshold_max_slider.setValue(90)
-        self.threshold_max_slider.valueChanged.connect(self.update_threshold)
-        
-        threshold_layout = QFormLayout()
-        threshold_layout.addRow(self.threshold_enabled)
-        threshold_layout.addRow("Min Threshold:", self.threshold_min_slider)
-        threshold_layout.addRow("Max Threshold:", self.threshold_max_slider)
-        
-        # Isosurface controls
-        self.isosurface_enabled = QCheckBox("Show Isosurfaces")
-        self.isosurface_enabled.toggled.connect(self.toggle_isosurfaces)
-        
-        self.num_isosurfaces_spin = QSpinBox()
-        self.num_isosurfaces_spin.setRange(1, 10)
-        self.num_isosurfaces_spin.setValue(3)
-        self.num_isosurfaces_spin.valueChanged.connect(self.update_isosurfaces)
-        
-        iso_layout = QFormLayout()
-        iso_layout.addRow(self.isosurface_enabled)
-        iso_layout.addRow("Number of Isosurfaces:", self.num_isosurfaces_spin)
         
         # Color map selection
         self.colormap_combo = QComboBox()
@@ -457,48 +542,71 @@ class ElectronFluxVisualizer(QMainWindow):
         self.colormap_combo.currentTextChanged.connect(self.change_colormap)
         mode_layout.addRow("Color Map:", self.colormap_combo)
         
-        # Add all layouts to group
         viz_layout.addLayout(mode_layout)
-        viz_layout.addLayout(threshold_layout)
-        viz_layout.addLayout(iso_layout)
         
-        # Insert into main control layout (after analysis_group)
-        control_layout = self.findChild(QVBoxLayout)  # Find the main control layout
-        # Insert before the plots group
-        plots_group_index = None
-        for i in range(control_layout.count()):
-            widget = control_layout.itemAt(i).widget()
-            if isinstance(widget, QGroupBox) and widget.title() == "Plot Windows":
-                plots_group_index = i
-                break
+        # Threshold controls
+        threshold_group = QGroupBox("Threshold Controls")
+        threshold_layout = QFormLayout(threshold_group)
         
-        if plots_group_index:
-            control_layout.insertWidget(plots_group_index, viz_group)
+        self.threshold_enabled = QCheckBox("Enable Thresholding")
+        self.threshold_enabled.toggled.connect(self.toggle_threshold)
+        threshold_layout.addRow(self.threshold_enabled)
+        
+        # Min threshold
+        min_threshold_layout = QHBoxLayout()
+        self.threshold_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.threshold_min_slider.setRange(0, 100)
+        self.threshold_min_slider.setValue(10)
+        self.threshold_min_slider.valueChanged.connect(self.update_threshold)
+        min_threshold_layout.addWidget(self.threshold_min_slider)
+        min_threshold_layout.addWidget(QLabel("10%"))
+        threshold_layout.addRow("Min Threshold:", min_threshold_layout)
+        
+        # Max threshold
+        max_threshold_layout = QHBoxLayout()
+        self.threshold_max_slider = QSlider(Qt.Orientation.Horizontal) 
+        self.threshold_max_slider.setRange(0, 100)
+        self.threshold_max_slider.setValue(90)
+        self.threshold_max_slider.valueChanged.connect(self.update_threshold)
+        max_threshold_layout.addWidget(self.threshold_max_slider)
+        max_threshold_layout.addWidget(QLabel("90%"))
+        threshold_layout.addRow("Max Threshold:", max_threshold_layout)
+        
+        viz_layout.addWidget(threshold_group)
+        
+        # Isosurface controls
+        iso_group = QGroupBox("Isosurface Controls")
+        iso_layout = QFormLayout(iso_group)
+        
+        self.isosurface_enabled = QCheckBox("Show Isosurfaces")
+        self.isosurface_enabled.toggled.connect(self.toggle_isosurfaces)
+        iso_layout.addRow(self.isosurface_enabled)
+        
+        self.num_isosurfaces_spin = QSpinBox()
+        self.num_isosurfaces_spin.setRange(1, 10)
+        self.num_isosurfaces_spin.setValue(3)
+        self.num_isosurfaces_spin.valueChanged.connect(self.update_isosurfaces)
+        iso_layout.addRow("Number of Isosurfaces:", self.num_isosurfaces_spin)
+        
+        viz_layout.addWidget(iso_group)
+        
+        # Insert into main control layout
+        if insert_index >= 0:
+            control_layout.insertWidget(insert_index, viz_group)
         else:
             control_layout.addWidget(viz_group)
 
     def change_visualization_mode(self, mode):
-        """Change the field visualization mode - IMPROVED ERROR HANDLING"""
+        """Change the field visualization mode - FIXED WITH DEBUGGING"""
         if not self.vtk_data:
             print("No VTK data loaded")
             return
             
-        print(f"Changing visualization mode to: {mode}")
+        print(f"=== CHANGING VISUALIZATION MODE TO: {mode} ===")
         
         try:
-            # Remove existing actors/volumes
-            if hasattr(self, 'field_actor') and self.field_actor:
-                self.renderer.RemoveActor(self.field_actor)
-                self.field_actor = None
-                
-            if hasattr(self, 'volume_actor') and self.volume_actor:
-                self.renderer.RemoveVolume(self.volume_actor)
-                self.volume_actor = None
-                
-            if hasattr(self, 'slice_actors'):
-                for actor in self.slice_actors:
-                    self.renderer.RemoveActor(actor)
-                self.slice_actors = []
+            # Clear existing visualization
+            self.clear_field_visualization()
                 
             # Apply new visualization mode
             if mode == "Volume Rendering":
@@ -515,96 +623,144 @@ class ElectronFluxVisualizer(QMainWindow):
                 self.setup_slice_planes()
             else:
                 # Fallback to original visualization
+                print("Using fallback field visualization")
                 self.setup_field_visualization()
                 
+            # Force render
             self.vtk_widget.GetRenderWindow().Render()
-            print(f"Visualization mode changed to: {mode}")
+            print(f"=== VISUALIZATION MODE CHANGED TO: {mode} ===")
             
         except Exception as e:
             print(f"Error changing visualization mode: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to basic field visualization
+            print("Falling back to basic field visualization")
             self.setup_field_visualization()
             self.vtk_widget.GetRenderWindow().Render()
 
+    def clear_field_visualization(self):
+        """Safely remove all field visualization actors - ENHANCED DEBUG"""
+        print("=== CLEARING FIELD VISUALIZATION ===")
+        
+        actors_removed = 0
+        
+        # Remove field actor
+        if hasattr(self, 'field_actor') and self.field_actor:
+            self.renderer.RemoveActor(self.field_actor)
+            self.field_actor = None
+            actors_removed += 1
+            print("Removed field_actor")
+            
+        # Remove volume actor
+        if hasattr(self, 'volume_actor') and self.volume_actor:
+            self.renderer.RemoveVolume(self.volume_actor)
+            self.volume_actor = None
+            actors_removed += 1
+            print("Removed volume_actor")
+            
+        # Remove slice actors
+        if hasattr(self, 'slice_actors'):
+            for i, actor in enumerate(self.slice_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.slice_actors = []
+            print(f"Removed {len(self.slice_actors)} slice_actors")
+            
+        # Remove isosurface actors
+        if hasattr(self, 'isosurface_actors'):
+            for i, actor in enumerate(self.isosurface_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.isosurface_actors = []
+            print(f"Removed isosurface_actors")
+            
+        print(f"Total actors removed: {actors_removed}")
+        
+        # Check remaining actors
+        actors = self.renderer.GetActors()
+        actors.InitTraversal()
+        remaining_count = 0
+        while actors.GetNextActor():
+            remaining_count += 1
+        print(f"Remaining actors in renderer: {remaining_count}")
+        print("=== CLEAR COMPLETE ===")
+
     def setup_volume_rendering(self):
-        """Setup volume rendering for 3D scalar field - FIXED VERSION"""
+        """Fixed volume rendering with better error handling"""
         if not self.vtk_data:
             return
             
         print("Setting up volume rendering...")
         
         try:
-            # For volume rendering, we need image data
-            if not isinstance(self.vtk_data, vtk.vtkImageData):
-                # Create a volume from point cloud using vtkGaussianSplatter
-                splatter = vtk.vtkGaussianSplatter()
-                splatter.SetInputData(self.vtk_data)
-                splatter.SetSampleDimensions(40, 40, 40)  # Reduced for performance
+            # Check if we already have image data
+            if isinstance(self.vtk_data, vtk.vtkImageData):
+                volume_data = self.vtk_data
+                print("Using existing image data")
+            else:
+                # Convert to image data using resample filter
+                print("Converting to image data for volume rendering...")
                 
-                # Calculate bounds for radius
+                # Get bounds
                 bounds = self.vtk_data.GetBounds()
-                max_extent = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
-                radius = max_extent / 20.0  # Adaptive radius
                 
-                splatter.SetRadius(radius)
-                splatter.SetExponentFactor(-5)  # Controls falloff
-                splatter.Update()
-                volume_data = splatter.GetOutput()
+                # Create a reasonable grid resolution
+                spacing = [(bounds[1]-bounds[0])/30, (bounds[3]-bounds[2])/30, (bounds[5]-bounds[4])/30]
+                
+                # Resample to structured grid
+                resample = vtk.vtkResampleToImage()
+                resample.SetInputData(self.vtk_data)
+                resample.SetSamplingDimensions(30, 30, 30)  # Reduced for performance
+                resample.Update()
+                volume_data = resample.GetOutput()
                 
                 if volume_data.GetNumberOfPoints() == 0:
-                    print("Warning: Volume splatter produced no data")
+                    print("Failed to create volume data")
                     return
-            else:
-                volume_data = self.vtk_data
-                
-            # Volume mapper - try GPU first, fallback to CPU
-            try:
-                volume_mapper = vtk.vtkGPUVolumeRayCastMapper()
-                print("Using GPU volume mapper")
-            except:
-                volume_mapper = vtk.vtkFixedPointVolumeRayCastMapper()
-                print("Using CPU volume mapper")
-                
+                    
+            # Use CPU volume mapper for stability
+            volume_mapper = vtk.vtkFixedPointVolumeRayCastMapper()
             volume_mapper.SetInputData(volume_data)
+            volume_mapper.SetBlendModeToComposite()
             
             # Volume properties
             volume_property = vtk.vtkVolumeProperty()
-            volume_property.ShadeOn()
             volume_property.SetInterpolationTypeToLinear()
+            volume_property.ShadeOn()
             
-            # Color transfer function
-            color_func = vtk.vtkColorTransferFunction()
+            # Get scalar range
             scalar_range = volume_data.GetScalarRange()
+            print(f"Volume scalar range: {scalar_range}")
             
-            if scalar_range[1] > scalar_range[0]:  # Valid range
-                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)  # Dark blue
-                color_func.AddRGBPoint(scalar_range[1] * 0.3, 0.0, 0.0, 1.0)  # Blue
-                color_func.AddRGBPoint(scalar_range[1] * 0.6, 0.0, 1.0, 0.0)  # Green
-                color_func.AddRGBPoint(scalar_range[1] * 0.9, 1.0, 1.0, 0.0)  # Yellow
-                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)  # Red
-            
-            # Opacity transfer function
-            opacity_func = vtk.vtkPiecewiseFunction()
             if scalar_range[1] > scalar_range[0]:
+                # Color transfer function
+                color_func = vtk.vtkColorTransferFunction()
+                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)
+                color_func.AddRGBPoint(scalar_range[1] * 0.25, 0.0, 0.0, 1.0)
+                color_func.AddRGBPoint(scalar_range[1] * 0.5, 0.0, 1.0, 0.0)
+                color_func.AddRGBPoint(scalar_range[1] * 0.75, 1.0, 1.0, 0.0)
+                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)
+                
+                # Opacity transfer function - make more transparent
+                opacity_func = vtk.vtkPiecewiseFunction()
                 opacity_func.AddPoint(scalar_range[0], 0.0)
                 opacity_func.AddPoint(scalar_range[1] * 0.1, 0.0)
-                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.1)
-                opacity_func.AddPoint(scalar_range[1] * 0.6, 0.3)
-                opacity_func.AddPoint(scalar_range[1], 0.8)
-            
-            volume_property.SetColor(color_func)
-            volume_property.SetScalarOpacity(opacity_func)
-            
-            # Create volume
-            if hasattr(self, 'volume_actor'):
-                self.renderer.RemoveVolume(self.volume_actor)
+                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.05)
+                opacity_func.AddPoint(scalar_range[1] * 0.6, 0.1)
+                opacity_func.AddPoint(scalar_range[1], 0.2)
                 
+                volume_property.SetColor(color_func)
+                volume_property.SetScalarOpacity(opacity_func)
+                
+            # Create volume
             self.volume_actor = vtk.vtkVolume()
             self.volume_actor.SetMapper(volume_mapper)
             self.volume_actor.SetProperty(volume_property)
             
             self.renderer.AddVolume(self.volume_actor)
-            
             print("Volume rendering setup complete")
             
         except Exception as e:
@@ -613,357 +769,569 @@ class ElectronFluxVisualizer(QMainWindow):
             self.setup_point_cloud_rendering()
 
     def setup_isosurface_rendering(self):
-        """Setup isosurface rendering with multiple contour levels - FIXED VERSION"""
+        """Fixed isosurface rendering"""
         if not self.vtk_data:
             return
             
         print("Setting up isosurface rendering...")
         
         try:
+            # Get scalar range
+            scalar_range = self.vtk_data.GetScalarRange()
+            print(f"Scalar range for isosurfaces: {scalar_range}")
+            
+            if scalar_range[1] <= scalar_range[0]:
+                print("Invalid scalar range for isosurfaces")
+                return
+                
             # Create contour filter
             contour = vtk.vtkContourFilter()
             contour.SetInputData(self.vtk_data)
             
-            # Generate isosurface values
-            scalar_range = self.vtk_data.GetScalarRange()
+            # Generate isosurface values - only in meaningful range
             num_contours = self.num_isosurfaces_spin.value()
+            min_val = scalar_range[1] * 0.3  # Start at 30% of max
+            max_val = scalar_range[1] * 0.9  # End at 90% of max
             
-            if scalar_range[1] > scalar_range[0]:
-                contour.GenerateValues(num_contours, 
-                                      scalar_range[1] * 0.2,  # Start at 20% of max
-                                      scalar_range[1] * 0.9)  # End at 90% of max
-            contour.Update()
-            
-            if contour.GetOutput().GetNumberOfPoints() == 0:
-                print("Warning: No isosurfaces generated")
-                return
-            
-            # Create mapper and actor
-            contour_mapper = vtk.vtkPolyDataMapper()
-            contour_mapper.SetInputConnection(contour.GetOutputPort())
-            contour_mapper.SetScalarRange(scalar_range)
-            
-            # Setup lookup table
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
-            contour_mapper.SetLookupTable(lut)
-            
-            if hasattr(self, 'field_actor'):
-                self.renderer.RemoveActor(self.field_actor)
+            if max_val > min_val:
+                contour.GenerateValues(num_contours, min_val, max_val)
+                contour.Update()
                 
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(contour_mapper)
-            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-            
-            self.renderer.AddActor(self.field_actor)
-            
-            print(f"Created {num_contours} isosurfaces")
-            
+                output = contour.GetOutput()
+                print(f"Contour generated {output.GetNumberOfPoints()} points")
+                
+                if output.GetNumberOfPoints() > 0:
+                    # Create mapper and actor
+                    contour_mapper = vtk.vtkPolyDataMapper()
+                    contour_mapper.SetInputConnection(contour.GetOutputPort())
+                    contour_mapper.SetScalarRange(scalar_range)
+                    
+                    # Setup lookup table
+                    lut = self.create_lookup_table(self.colormap_combo.currentText())
+                    contour_mapper.SetLookupTable(lut)
+                    
+                    self.field_actor = vtk.vtkActor()
+                    self.field_actor.SetMapper(contour_mapper)
+                    self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+                    
+                    self.renderer.AddActor(self.field_actor)
+                    print(f"Created {num_contours} isosurfaces")
+                else:
+                    print("No isosurfaces generated - trying point cloud fallback")
+                    self.setup_point_cloud_rendering()
+            else:
+                print("Invalid contour range")
+                
         except Exception as e:
             print(f"Isosurface rendering failed: {e}")
-            # Fallback to point cloud
             self.setup_point_cloud_rendering()
 
     def setup_point_cloud_rendering(self):
-        """Setup point cloud rendering with spherical glyphs"""
+        """TRUE point cloud rendering with visible spheres"""
         if not self.vtk_data:
             return
             
-        print("Setting up point cloud rendering...")
+        print("Setting up TRUE point cloud rendering...")
         
-        # Create sphere glyphs
-        sphere = vtk.vtkSphereSource()
-        sphere.SetRadius(100)  # 100 km radius
-        sphere.SetThetaResolution(8)
-        sphere.SetPhiResolution(8)
+        try:
+            # Get scalar data
+            scalar_array = self.vtk_data.GetPointData().GetScalars()
+            if not scalar_array:
+                print("No scalar data for point cloud")
+                return
+                
+            scalar_range = scalar_array.GetRange()
+            num_points = self.vtk_data.GetNumberOfPoints()
+            print(f"Point cloud: {num_points} points, range: {scalar_range}")
+            
+            # Only show points with significant flux values
+            threshold = vtk.vtkThreshold()
+            threshold.SetInputData(self.vtk_data)
+            threshold.SetLowerThreshold(scalar_range[1] * 0.05)  # Show points > 5% of max flux
+            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+            threshold.Update()
+            
+            significant_data = threshold.GetOutput()
+            significant_points = significant_data.GetNumberOfPoints()
+            print(f"Significant flux points: {significant_points}")
+            
+            if significant_points == 0:
+                print("No significant points found, showing all data")
+                significant_data = self.vtk_data
+                significant_points = num_points
+            
+            # Subsample if too many points
+            if significant_points > 5000:
+                print("Subsampling for performance...")
+                mask = vtk.vtkMaskPoints()
+                mask.SetInputData(significant_data)
+                mask.SetMaximumNumberOfPoints(3000)
+                mask.SetRandomMode(True)
+                mask.Update()
+                final_data = mask.GetOutput()
+                print(f"Subsampled to {final_data.GetNumberOfPoints()} points")
+            else:
+                final_data = significant_data
+            
+            # Create spherical glyphs
+            sphere = vtk.vtkSphereSource()
+            sphere.SetRadius(400)  # Large 400km radius for visibility
+            sphere.SetThetaResolution(10)
+            sphere.SetPhiResolution(10)
+            
+            glyph = vtk.vtkGlyph3D()
+            glyph.SetInputData(final_data)
+            glyph.SetSourceConnection(sphere.GetOutputPort())
+            glyph.SetScaleModeToDataScalingOff()
+            glyph.SetColorModeToColorByScalar()
+            glyph.Update()
+            
+            # Create mapper
+            glyph_mapper = vtk.vtkPolyDataMapper()
+            glyph_mapper.SetInputConnection(glyph.GetOutputPort())
+            glyph_mapper.SetScalarRange(scalar_range)
+            glyph_mapper.ScalarVisibilityOn()
+            
+            # Setup lookup table
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            glyph_mapper.SetLookupTable(lut)
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(glyph_mapper)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print(f"Point cloud setup complete: {final_data.GetNumberOfPoints()} visible spheres")
+            
+        except Exception as e:
+            print(f"Point cloud rendering failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def setup_simple_points(self):
+        """Fallback: simple point rendering without glyphs"""
+        print("Setting up simple point rendering...")
         
-        glyph = vtk.vtkGlyph3D()
-        glyph.SetInputData(self.vtk_data)
-        glyph.SetSourceConnection(sphere.GetOutputPort())
-        glyph.SetScaleModeToScaleByScalar()
-        glyph.SetScaleFactor(0.1)
-        glyph.Update()
-        
-        # Create mapper
-        glyph_mapper = vtk.vtkPolyDataMapper()
-        glyph_mapper.SetInputConnection(glyph.GetOutputPort())
-        glyph_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
-        
-        # Setup lookup table
-        lut = self.create_lookup_table(self.colormap_combo.currentText())
-        glyph_mapper.SetLookupTable(lut)
-        
-        self.field_actor = vtk.vtkActor()
-        self.field_actor.SetMapper(glyph_mapper)
-        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-        
-        self.renderer.AddActor(self.field_actor)
+        try:
+            # Simple mapper without glyphs
+            point_mapper = vtk.vtkDataSetMapper()
+            point_mapper.SetInputData(self.vtk_data)
+            
+            scalar_range = self.vtk_data.GetScalarRange()
+            point_mapper.SetScalarRange(scalar_range)
+            
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            point_mapper.SetLookupTable(lut)
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(point_mapper)
+            self.field_actor.GetProperty().SetPointSize(4.0)
+            self.field_actor.GetProperty().SetRenderPointsAsSpheres(True)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print("Simple point rendering setup complete")
+            
+        except Exception as e:
+            print(f"Simple point rendering failed: {e}")
 
     def setup_wireframe_rendering(self):
-        """Setup wireframe rendering"""
+        """Fixed wireframe rendering"""
         if not self.vtk_data:
             return
             
         print("Setting up wireframe rendering...")
         
-        # Extract surface
-        surface = vtk.vtkDataSetSurfaceFilter()
-        surface.SetInputData(self.vtk_data)
-        surface.Update()
-        
-        # Create mapper
-        wireframe_mapper = vtk.vtkPolyDataMapper()
-        wireframe_mapper.SetInputConnection(surface.GetOutputPort())
-        wireframe_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
-        
-        # Setup lookup table
-        lut = self.create_lookup_table(self.colormap_combo.currentText())
-        wireframe_mapper.SetLookupTable(lut)
-        
-        self.field_actor = vtk.vtkActor()
-        self.field_actor.SetMapper(wireframe_mapper)
-        self.field_actor.GetProperty().SetRepresentationToWireframe()
-        self.field_actor.GetProperty().SetLineWidth(1.0)
-        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-        
-        self.renderer.AddActor(self.field_actor)
+        try:
+            # For unstructured grids, extract edges
+            if isinstance(self.vtk_data, vtk.vtkUnstructuredGrid):
+                edges = vtk.vtkExtractEdges()
+                edges.SetInputData(self.vtk_data)
+                edges.Update()
+                wireframe_data = edges.GetOutput()
+            else:
+                # For other types, extract surface then edges
+                surface = vtk.vtkDataSetSurfaceFilter()
+                surface.SetInputData(self.vtk_data)
+                surface.Update()
+                
+                edges = vtk.vtkExtractEdges()
+                edges.SetInputData(surface.GetOutput())
+                edges.Update()
+                wireframe_data = edges.GetOutput()
+            
+            print(f"Extracted {wireframe_data.GetNumberOfCells()} edges")
+            
+            # Create mapper
+            wireframe_mapper = vtk.vtkPolyDataMapper()
+            wireframe_mapper.SetInputData(wireframe_data)
+            
+            scalar_range = self.vtk_data.GetScalarRange()
+            wireframe_mapper.SetScalarRange(scalar_range)
+            
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            wireframe_mapper.SetLookupTable(lut)
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(wireframe_mapper)
+            self.field_actor.GetProperty().SetLineWidth(1.0)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print("Wireframe rendering setup complete")
+            
+        except Exception as e:
+            print(f"Wireframe rendering failed: {e}")
 
     def setup_surface_with_edges(self):
-        """Setup surface rendering with edge display"""
+        """Fixed surface with edges rendering"""
         if not self.vtk_data:
             return
             
         print("Setting up surface with edges...")
         
-        # Extract surface
-        surface = vtk.vtkDataSetSurfaceFilter()
-        surface.SetInputData(self.vtk_data)
-        surface.Update()
-        
-        # Create mapper
-        surface_mapper = vtk.vtkPolyDataMapper()
-        surface_mapper.SetInputConnection(surface.GetOutputPort())
-        surface_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
-        
-        # Setup lookup table
-        lut = self.create_lookup_table(self.colormap_combo.currentText())
-        surface_mapper.SetLookupTable(lut)
-        
-        self.field_actor = vtk.vtkActor()
-        self.field_actor.SetMapper(surface_mapper)
-        self.field_actor.GetProperty().SetRepresentationToSurface()
-        self.field_actor.GetProperty().EdgeVisibilityOn()
-        self.field_actor.GetProperty().SetEdgeColor(0.2, 0.2, 0.2)
-        self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-        
-        self.renderer.AddActor(self.field_actor)
+        try:
+            # Extract outer surface
+            surface = vtk.vtkDataSetSurfaceFilter()
+            surface.SetInputData(self.vtk_data)
+            surface.Update()
+            
+            surface_data = surface.GetOutput()
+            print(f"Extracted surface with {surface_data.GetNumberOfPoints()} points")
+            
+            if surface_data.GetNumberOfPoints() == 0:
+                print("No surface extracted - falling back to point cloud")
+                self.setup_point_cloud_rendering()
+                return
+            
+            # Create mapper
+            surface_mapper = vtk.vtkPolyDataMapper()
+            surface_mapper.SetInputData(surface_data)
+            
+            scalar_range = self.vtk_data.GetScalarRange()
+            surface_mapper.SetScalarRange(scalar_range)
+            
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            surface_mapper.SetLookupTable(lut)
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(surface_mapper)
+            self.field_actor.GetProperty().SetRepresentationToSurface()
+            self.field_actor.GetProperty().EdgeVisibilityOn()
+            self.field_actor.GetProperty().SetEdgeColor(0.2, 0.2, 0.2)
+            self.field_actor.GetProperty().SetLineWidth(1.0)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print("Surface with edges setup complete")
+            
+        except Exception as e:
+            print(f"Surface with edges failed: {e}")
 
     def setup_slice_planes(self):
-        """Setup slice plane visualization"""
+        """Fixed slice planes rendering"""
         if not self.vtk_data:
             return
             
         print("Setting up slice planes...")
         
-        # Create three orthogonal slice planes
-        planes = []
-        
-        # XY plane (Z = 0)
-        plane_xy = vtk.vtkPlane()
-        plane_xy.SetOrigin(0, 0, 0)
-        plane_xy.SetNormal(0, 0, 1)
-        planes.append(plane_xy)
-        
-        # XZ plane (Y = 0) 
-        plane_xz = vtk.vtkPlane()
-        plane_xz.SetOrigin(0, 0, 0)
-        plane_xz.SetNormal(0, 1, 0)
-        planes.append(plane_xz)
-        
-        # YZ plane (X = 0)
-        plane_yz = vtk.vtkPlane()
-        plane_yz.SetOrigin(0, 0, 0)
-        plane_yz.SetNormal(1, 0, 0)
-        planes.append(plane_yz)
-        
-        self.slice_actors = []
-        
-        for i, plane in enumerate(planes):
-            # Create cutter
-            cutter = vtk.vtkCutter()
-            cutter.SetInputData(self.vtk_data)
-            cutter.SetCutFunction(plane)
-            cutter.Update()
+        try:
+            # Get bounds for slice positioning
+            bounds = self.vtk_data.GetBounds()
+            center = [(bounds[1]+bounds[0])/2, (bounds[3]+bounds[2])/2, (bounds[5]+bounds[4])/2]
             
-            # Create mapper
-            slice_mapper = vtk.vtkPolyDataMapper()
-            slice_mapper.SetInputConnection(cutter.GetOutputPort())
-            slice_mapper.SetScalarRange(self.vtk_data.GetScalarRange())
+            # Create three orthogonal slice planes
+            planes_config = [
+                {"origin": [center[0], center[1], center[2]], "normal": [1, 0, 0], "name": "YZ"},
+                {"origin": [center[0], center[1], center[2]], "normal": [0, 1, 0], "name": "XZ"},
+                {"origin": [center[0], center[1], center[2]], "normal": [0, 0, 1], "name": "XY"}
+            ]
             
-            # Setup lookup table
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
-            slice_mapper.SetLookupTable(lut)
+            self.slice_actors = []
             
-            # Create actor
-            slice_actor = vtk.vtkActor()
-            slice_actor.SetMapper(slice_mapper)
-            slice_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            for config in planes_config:
+                # Create plane
+                plane = vtk.vtkPlane()
+                plane.SetOrigin(config["origin"])
+                plane.SetNormal(config["normal"])
+                
+                # Create cutter
+                cutter = vtk.vtkCutter()
+                cutter.SetInputData(self.vtk_data)
+                cutter.SetCutFunction(plane)
+                cutter.Update()
+                
+                slice_data = cutter.GetOutput()
+                print(f"Slice {config['name']}: {slice_data.GetNumberOfPoints()} points")
+                
+                if slice_data.GetNumberOfPoints() > 0:
+                    # Create mapper
+                    slice_mapper = vtk.vtkPolyDataMapper()
+                    slice_mapper.SetInputData(slice_data)
+                    
+                    scalar_range = self.vtk_data.GetScalarRange()
+                    slice_mapper.SetScalarRange(scalar_range)
+                    
+                    lut = self.create_lookup_table(self.colormap_combo.currentText())
+                    slice_mapper.SetLookupTable(lut)
+                    
+                    # Create actor
+                    slice_actor = vtk.vtkActor()
+                    slice_actor.SetMapper(slice_mapper)
+                    slice_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+                    
+                    self.slice_actors.append(slice_actor)
+                    self.renderer.AddActor(slice_actor)
+                    
+            print(f"Created {len(self.slice_actors)} slice planes")
             
-            self.slice_actors.append(slice_actor)
-            self.renderer.AddActor(slice_actor)
+        except Exception as e:
+            print(f"Slice planes failed: {e}")
 
     def create_lookup_table(self, colormap_name):
-        """Create lookup table based on colormap name"""
+        """Create lookup table with better color schemes"""
         lut = vtk.vtkLookupTable()
         lut.SetNumberOfTableValues(256)
         
-        if colormap_name == "Blue to Red":
-            lut.SetHueRange(0.667, 0.0)  # Blue to red
-        elif colormap_name == "Viridis":
-            # Approximate viridis colormap
-            lut.SetHueRange(0.7, 0.15)
-            lut.SetSaturationRange(1.0, 0.7)
-        elif colormap_name == "Plasma":
-            # Approximate plasma colormap  
-            lut.SetHueRange(0.8, 0.05)
-            lut.SetSaturationRange(1.0, 1.0)
-        elif colormap_name == "Cool to Warm":
-            lut.SetHueRange(0.667, 0.0)
-            lut.SetSaturationRange(1.0, 1.0)
-        elif colormap_name == "Rainbow":
-            lut.SetHueRange(0.0, 0.667)
-        elif colormap_name == "Grayscale":
-            lut.SetHueRange(0.0, 0.0)
-            lut.SetSaturationRange(0.0, 0.0)
+        try:
+            if colormap_name == "Blue to Red":
+                lut.SetHueRange(0.667, 0.0)  # Blue to red
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(0.3, 1.0)
+            elif colormap_name == "Viridis":
+                # Approximate viridis colormap
+                for i in range(256):
+                    t = i / 255.0
+                    if t < 0.25:
+                        r, g, b = 0.267004 + t*0.183371, 0.004874 + t*0.478894, 0.329415 + t*0.511095
+                    elif t < 0.5:
+                        t_norm = (t - 0.25) / 0.25
+                        r, g, b = 0.127568 + t_norm*0.253935, 0.566949 + t_norm*0.214982, 0.550556 + t_norm*(-0.133721)
+                    elif t < 0.75:
+                        t_norm = (t - 0.5) / 0.25
+                        r, g, b = 0.369214 + t_norm*0.304662, 0.788675 + t_norm*0.138379, 0.382914 + t_norm*(-0.224125)
+                    else:
+                        t_norm = (t - 0.75) / 0.25
+                        r, g, b = 0.663765 + t_norm*0.267004, 0.865006 + t_norm*0.104775, 0.197275 + t_norm*0.109709
+                    lut.SetTableValue(i, r, g, b, 1.0)
+            elif colormap_name == "Plasma":
+                # Approximate plasma colormap
+                for i in range(256):
+                    t = i / 255.0
+                    r = 0.050383 + t * (0.940015 - 0.050383)
+                    g = 0.029803 + t * t * (0.975158 - 0.029803)
+                    b = 0.527975 + t * (0.131326 - 0.527975)
+                    lut.SetTableValue(i, r, g, b, 1.0)
+            elif colormap_name == "Cool to Warm":
+                lut.SetHueRange(0.667, 0.0)
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(0.4, 1.0)
+            elif colormap_name == "Rainbow":
+                lut.SetHueRange(0.0, 0.667)
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(1.0, 1.0)
+            elif colormap_name == "Grayscale":
+                lut.SetHueRange(0.0, 0.0)
+                lut.SetSaturationRange(0.0, 0.0)
+                lut.SetValueRange(0.0, 1.0)
+            else:
+                # Default blue to red
+                lut.SetHueRange(0.667, 0.0)
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(0.3, 1.0)
+                
+            lut.Build()
+            return lut
             
-        lut.SetValueRange(0.0, 1.0)
-        lut.Build()
-        return lut
+        except Exception as e:
+            print(f"Error creating lookup table: {e}")
+            # Return simple blue-to-red as fallback
+            lut.SetHueRange(0.667, 0.0)
+            lut.Build()
+            return lut
 
     def update_opacity(self, value):
-        """Update field visualization opacity"""
+        """Update field visualization opacity - FIXED"""
         opacity = value / 100.0
         self.opacity_label.setText(f"{value}%")
         
-        if hasattr(self, 'field_actor') and self.field_actor:
-            self.field_actor.GetProperty().SetOpacity(opacity)
-            
-        if hasattr(self, 'volume_actor') and self.volume_actor:
-            # Update volume opacity (more complex)
-            volume_property = self.volume_actor.GetProperty()
-            opacity_func = volume_property.GetScalarOpacity()
-            # Scale existing opacity function
-            
-        if hasattr(self, 'slice_actors'):
-            for actor in self.slice_actors:
-                actor.GetProperty().SetOpacity(opacity)
+        try:
+            if hasattr(self, 'field_actor') and self.field_actor:
+                self.field_actor.GetProperty().SetOpacity(opacity)
                 
-        self.vtk_widget.GetRenderWindow().Render()
+            if hasattr(self, 'volume_actor') and self.volume_actor:
+                # For volume rendering, update the opacity function
+                volume_property = self.volume_actor.GetProperty()
+                opacity_func = volume_property.GetScalarOpacity()
+                
+                # Scale the existing opacity function
+                if opacity_func:
+                    # Get current range
+                    range_val = opacity_func.GetRange()
+                    if range_val[1] > range_val[0]:
+                        # Create new scaled opacity function
+                        new_opacity = vtk.vtkPiecewiseFunction()
+                        for i in range(int(opacity_func.GetSize())):
+                            x = range_val[0] + i * (range_val[1] - range_val[0]) / (opacity_func.GetSize() - 1)
+                            y = opacity_func.GetValue(x) * opacity
+                            new_opacity.AddPoint(x, y)
+                        volume_property.SetScalarOpacity(new_opacity)
+                
+            if hasattr(self, 'slice_actors'):
+                for actor in self.slice_actors:
+                    if actor:
+                        actor.GetProperty().SetOpacity(opacity)
+                        
+            self.vtk_widget.GetRenderWindow().Render()
+            
+        except Exception as e:
+            print(f"Error updating opacity: {e}")
 
     def toggle_threshold(self, enabled):
-        """Toggle threshold filtering"""
-        if enabled:
-            self.update_threshold()
-        else:
-            # Remove threshold and restore full data
-            self.change_visualization_mode(self.viz_mode_combo.currentText())
+        """Toggle threshold filtering - FIXED"""
+        try:
+            if enabled and self.vtk_data:
+                self.update_threshold()
+            else:
+                # Restore original data visualization
+                current_mode = self.viz_mode_combo.currentText()
+                self.change_visualization_mode(current_mode)
+        except Exception as e:
+            print(f"Error toggling threshold: {e}")
 
     def update_threshold(self):
-        """Update threshold values with correct VTK API"""
+        """Update threshold values - FIXED"""
         if not self.threshold_enabled.isChecked() or not self.vtk_data:
             return
             
-        scalar_range = self.vtk_data.GetScalarRange()
-        min_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_min_slider.value() / 100.0)
-        max_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_max_slider.value() / 100.0)
-        
-        print(f"Applying threshold: {min_val:.2e} to {max_val:.2e}")
-        
-        # Apply threshold filter with correct VTK 9+ API
-        threshold = vtk.vtkThreshold()
-        threshold.SetInputData(self.vtk_data)
-        
-        # Use the correct modern VTK threshold API
-        threshold.SetLowerThreshold(min_val)
-        threshold.SetUpperThreshold(max_val)
-        threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
-        threshold.Update()
-        
-        # Store the thresholded data temporarily
-        self.thresholded_data = threshold.GetOutput()
-        
-        # Re-apply current visualization mode with thresholded data
-        self.apply_visualization_to_data(self.thresholded_data)
+        try:
+            scalar_range = self.vtk_data.GetScalarRange()
+            if scalar_range[1] <= scalar_range[0]:
+                print("Invalid scalar range for thresholding")
+                return
+                
+            min_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_min_slider.value() / 100.0)
+            max_val = scalar_range[0] + (scalar_range[1] - scalar_range[0]) * (self.threshold_max_slider.value() / 100.0)
+            
+            if min_val >= max_val:
+                print("Invalid threshold range")
+                return
+                
+            print(f"Applying threshold: {min_val:.2e} to {max_val:.2e}")
+            
+            # Apply threshold filter
+            threshold = vtk.vtkThreshold()
+            threshold.SetInputData(self.vtk_data)
+            threshold.SetLowerThreshold(min_val)
+            threshold.SetUpperThreshold(max_val)
+            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_BETWEEN)
+            threshold.Update()
+            
+            thresholded_output = threshold.GetOutput()
+            print(f"Threshold result: {thresholded_output.GetNumberOfPoints()} points")
+            
+            if thresholded_output.GetNumberOfPoints() > 0:
+                # Apply current visualization mode to thresholded data
+                self.apply_visualization_to_data(thresholded_output)
+            else:
+                print("No points passed threshold")
+                
+        except Exception as e:
+            print(f"Error updating threshold: {e}")
 
     def apply_visualization_to_data(self, data):
-        """Apply current visualization mode to given data"""
+        """Apply current visualization mode to given data - FIXED"""
         if not data:
             return
             
-        # Remove existing actors
-        if hasattr(self, 'field_actor') and self.field_actor:
-            self.renderer.RemoveActor(self.field_actor)
-        if hasattr(self, 'volume_actor') and self.volume_actor:
-            self.renderer.RemoveVolume(self.volume_actor)
-        if hasattr(self, 'slice_actors'):
-            for actor in self.slice_actors:
-                self.renderer.RemoveActor(actor)
+        try:
+            # Clear existing visualization
+            self.clear_field_visualization()
             
-        # Temporarily replace vtk_data
-        original_data = self.vtk_data
-        self.vtk_data = data
-        
-        # Apply current visualization mode
-        current_mode = self.viz_mode_combo.currentText()
-        
-        if current_mode == "Volume Rendering":
-            self.setup_volume_rendering()
-        elif current_mode == "Isosurfaces":
-            self.setup_isosurface_rendering()
-        elif current_mode == "Point Cloud":
-            self.setup_point_cloud_rendering()
-        elif current_mode == "Wireframe":
-            self.setup_wireframe_rendering()
-        elif current_mode == "Surface with Edges":
-            self.setup_surface_with_edges()
-        elif current_mode == "Slice Planes":
-            self.setup_slice_planes()
-        else:
-            # Default to original field visualization
+            # Temporarily replace vtk_data
+            original_data = self.vtk_data
+            self.vtk_data = data
+            
+            # Apply current visualization mode
+            current_mode = self.viz_mode_combo.currentText()
+            
+            if current_mode == "Volume Rendering":
+                self.setup_volume_rendering()
+            elif current_mode == "Isosurfaces":
+                self.setup_isosurface_rendering()
+            elif current_mode == "Point Cloud":
+                self.setup_point_cloud_rendering()
+            elif current_mode == "Wireframe":
+                self.setup_wireframe_rendering()
+            elif current_mode == "Surface with Edges":
+                self.setup_surface_with_edges()
+            elif current_mode == "Slice Planes":
+                self.setup_slice_planes()
+            else:
+                self.setup_field_visualization()
+                
+            # Restore original data reference
+            self.vtk_data = original_data
+            
+            self.vtk_widget.GetRenderWindow().Render()
+            
+        except Exception as e:
+            print(f"Error applying visualization to data: {e}")
+            # Restore original data and try basic visualization
+            self.vtk_data = original_data
             self.setup_field_visualization()
-            
-        # Restore original data reference
-        self.vtk_data = original_data
-        
-        self.vtk_widget.GetRenderWindow().Render()
 
     def toggle_isosurfaces(self, enabled):
-        """Toggle isosurface display"""
-        if enabled and self.viz_mode_combo.currentText() != "Isosurfaces":
-            self.viz_mode_combo.setCurrentText("Isosurfaces")
-        elif not enabled and hasattr(self, 'isosurface_actors'):
-            for actor in self.isosurface_actors:
-                self.renderer.RemoveActor(actor)
-            self.vtk_widget.GetRenderWindow().Render()
+        """Toggle isosurface display - FIXED"""
+        try:
+            if enabled and self.vtk_data:
+                if self.viz_mode_combo.currentText() != "Isosurfaces":
+                    self.viz_mode_combo.setCurrentText("Isosurfaces")
+                else:
+                    self.setup_isosurface_rendering()
+            elif not enabled:
+                # Switch to a different mode or clear isosurfaces
+                if self.viz_mode_combo.currentText() == "Isosurfaces":
+                    self.viz_mode_combo.setCurrentText("Point Cloud")
+        except Exception as e:
+            print(f"Error toggling isosurfaces: {e}")
 
     def update_isosurfaces(self):
-        """Update number of isosurfaces"""
-        if (self.viz_mode_combo.currentText() == "Isosurfaces" and 
-            self.isosurface_enabled.isChecked()):
-            self.setup_isosurface_rendering()
+        """Update number of isosurfaces - FIXED"""
+        try:
+            if (self.viz_mode_combo.currentText() == "Isosurfaces" and 
+                self.isosurface_enabled.isChecked() and 
+                self.vtk_data):
+                self.setup_isosurface_rendering()
+        except Exception as e:
+            print(f"Error updating isosurfaces: {e}")
 
     def change_colormap(self, colormap_name):
-        """Change the color mapping"""
-        if hasattr(self, 'field_actor') and self.field_actor:
-            mapper = self.field_actor.GetMapper()
-            if mapper:
-                lut = self.create_lookup_table(colormap_name)
-                mapper.SetLookupTable(lut)
-                
-                # Update scalar bar
-                if hasattr(self, 'scalar_bar'):
-                    self.scalar_bar.SetLookupTable(lut)
+        """Change the color mapping - FIXED"""
+        try:
+            new_lut = self.create_lookup_table(colormap_name)
+            
+            if hasattr(self, 'field_actor') and self.field_actor:
+                mapper = self.field_actor.GetMapper()
+                if mapper:
+                    mapper.SetLookupTable(new_lut)
                     
-        self.vtk_widget.GetRenderWindow().Render()
+            if hasattr(self, 'slice_actors'):
+                for actor in self.slice_actors:
+                    if actor:
+                        mapper = actor.GetMapper()
+                        if mapper:
+                            mapper.SetLookupTable(new_lut)
+                            
+            # Update scalar bar
+            if hasattr(self, 'scalar_bar') and self.scalar_bar:
+                self.scalar_bar.SetLookupTable(new_lut)
+                    
+            self.vtk_widget.GetRenderWindow().Render()
+            print(f"Changed colormap to: {colormap_name}")
+            
+        except Exception as e:
+            print(f"Error changing colormap: {e}")
         
     def create_earth_representation(self):
         """Create a simple Earth sphere for reference"""
@@ -1000,7 +1368,7 @@ class ElectronFluxVisualizer(QMainWindow):
         self.show_flux_time_button.clicked.connect(self.show_flux_time_window)
 
     def load_vtk_data(self):
-        """Load VTK data file with comprehensive format support"""
+        """Load VTK data file with comprehensive format support - CLEAN VERSION"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load VTK Data", "", 
             "VTK Files (*.vtk *.vtu *.vtp *.vts *.vti);;XML VTK (*.vtu *.vtp *.vts *.vti);;Legacy VTK (*.vtk);;All Files (*)"
@@ -1057,24 +1425,37 @@ class ElectronFluxVisualizer(QMainWindow):
             
             self.progress_bar.setValue(75)
             
-            # Handle different VTK data types
-            if isinstance(output, (vtk.vtkImageData, vtk.vtkStructuredGrid, vtk.vtkRectilinearGrid)):
-                print("Converting structured data to unstructured grid...")
-                self.vtk_data = self.convert_to_unstructured_grid(output)
-            elif isinstance(output, vtk.vtkPolyData):
-                print("Converting polydata to unstructured grid...")
-                self.vtk_data = self.convert_polydata_to_unstructured_grid(output)
-            elif isinstance(output, vtk.vtkUnstructuredGrid):
-                print("Using unstructured grid directly")
-                self.vtk_data = output
+            # Use original data directly without conversion for structured grids
+            print(f"Using original {type(output).__name__} directly")
+            self.vtk_data = output
+            
+            # Check and setup scalar data
+            scalar_array = output.GetPointData().GetScalars()
+            if scalar_array:
+                print(f"Scalar data: {scalar_array.GetName()}, range: {scalar_array.GetRange()}")
             else:
-                print(f"Attempting to use {type(output).__name__} directly")
-                self.vtk_data = output
+                print("No primary scalars found, checking available arrays...")
+                point_data = output.GetPointData()
+                for i in range(point_data.GetNumberOfArrays()):
+                    array = point_data.GetArray(i)
+                    print(f"  Array {i}: {array.GetName()}")
                 
-            # Verify and setup scalar data
-            self.setup_scalar_data()
+                # Set first array as scalars if available
+                if point_data.GetNumberOfArrays() > 0:
+                    first_array = point_data.GetArray(0)
+                    point_data.SetScalars(first_array)
+                    print(f"Set '{first_array.GetName()}' as primary scalars")
+                    scalar_array = first_array
+            
+            # Verify scalar data exists
+            if not scalar_array:
+                raise ValueError("No scalar data available for visualization")
+            
+            # Clear any existing visualization
+            self.clear_field_visualization()
             
             # Setup field visualization
+            print("Setting up field visualization...")
             self.setup_field_visualization()
             
             # Update analyzer
@@ -1082,8 +1463,7 @@ class ElectronFluxVisualizer(QMainWindow):
             
             self.progress_bar.setValue(100)
             
-            # Get scalar info for status
-            scalar_array = self.vtk_data.GetPointData().GetScalars()
+            # Update status
             scalar_name = scalar_array.GetName() if scalar_array else "None"
             scalar_range = scalar_array.GetRange() if scalar_array else (0, 0)
             
@@ -1094,6 +1474,10 @@ class ElectronFluxVisualizer(QMainWindow):
                 f"Scalar: {scalar_name} | "
                 f"Range: {scalar_range[0]:.2e} to {scalar_range[1]:.2e}"
             )
+            
+            # Force render
+            print("Forcing render...")
+            self.vtk_widget.GetRenderWindow().Render()
             
             print("VTK file loaded successfully!")
             
@@ -1283,81 +1667,149 @@ class ElectronFluxVisualizer(QMainWindow):
         print(f"Created default scalar field with {len(scalar_values)} values")
 
     def setup_field_visualization(self):
-        """Setup 3D field visualization with improved handling"""
+        """Setup field visualization - WORKING POINT CLOUD VERSION"""
         if not self.vtk_data:
+            print("ERROR: No VTK data for field visualization")
             return
             
         print("Setting up field visualization...")
         
-        # Remove existing field actor
-        if hasattr(self, 'field_actor'):
-            self.renderer.RemoveActor(self.field_actor)
+        try:
+            # Get scalar data
+            scalar_array = self.vtk_data.GetPointData().GetScalars()
+            if not scalar_array:
+                print("ERROR: No scalar data for visualization")
+                return
+                
+            scalar_range = scalar_array.GetRange()
+            print(f"Scalar range: {scalar_range[0]:.2e} to {scalar_range[1]:.2e}")
             
-        # Get scalar range for proper coloring
-        scalar_array = self.vtk_data.GetPointData().GetScalars()
-        if not scalar_array:
-            print("Warning: No scalar data for visualization")
+            num_points = self.vtk_data.GetNumberOfPoints()
+            print(f"Total points: {num_points}")
+            
+            # Create a threshold filter to only show points with significant flux
+            threshold = vtk.vtkThreshold()
+            threshold.SetInputData(self.vtk_data)
+            threshold.SetLowerThreshold(scalar_range[1] * 0.01)  # Only show points > 1% of max
+            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+            threshold.Update()
+            
+            thresholded_data = threshold.GetOutput()
+            print(f"Points with significant flux: {thresholded_data.GetNumberOfPoints()}")
+            
+            if thresholded_data.GetNumberOfPoints() == 0:
+                print("No points above threshold, using all points")
+                # Use all points if threshold removes everything
+                thresholded_data = self.vtk_data
+            
+            # Convert to polydata with spheres for each point
+            sphere = vtk.vtkSphereSource()
+            sphere.SetRadius(300)  # 300 km radius spheres
+            sphere.SetThetaResolution(8)
+            sphere.SetPhiResolution(8)
+            
+            glyph = vtk.vtkGlyph3D()
+            glyph.SetInputData(thresholded_data)
+            glyph.SetSourceConnection(sphere.GetOutputPort())
+            glyph.SetScaleModeToDataScalingOff()  # Fixed size
+            glyph.SetColorModeToColorByScalar()
+            glyph.Update()
+            
+            print(f"Created {glyph.GetOutput().GetNumberOfPoints()} glyph points")
+            
+            # Create mapper
+            field_mapper = vtk.vtkPolyDataMapper()
+            field_mapper.SetInputConnection(glyph.GetOutputPort())
+            field_mapper.SetScalarRange(scalar_range)
+            field_mapper.ScalarVisibilityOn()
+            
+            # Setup lookup table
+            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            field_mapper.SetLookupTable(lut)
+            
+            # Create field actor
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(field_mapper)
+            self.field_actor.GetProperty().SetOpacity(0.7)  # Semi-transparent
+            
+            self.renderer.AddActor(self.field_actor)
+            
+            # Setup scalar bar
+            self.setup_scalar_bar(lut, scalar_array.GetName())
+            
+            # Reset camera to show all data
+            self.renderer.ResetCamera()
+            
+            print("Field visualization setup complete")
+            
+        except Exception as e:
+            print(f"ERROR in setup_field_visualization: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def debug_field_actor(self):
+        """Specific debug for field actor"""
+        print("\n=== FIELD ACTOR DEBUG ===")
+        
+        if not hasattr(self, 'field_actor') or not self.field_actor:
+            print("No field_actor exists!")
             return
             
-        scalar_range = scalar_array.GetRange()
-        print(f"Scalar range: {scalar_range[0]:.2e} to {scalar_range[1]:.2e}")
+        print("Field actor exists")
         
-        # Create field mapper
-        field_mapper = vtk.vtkDataSetMapper()
-        field_mapper.SetInputData(self.vtk_data)
-        field_mapper.SetScalarModeToUsePointData()
-        
-        # Setup lookup table for nice coloring
-        lut = vtk.vtkLookupTable()
-        lut.SetHueRange(0.667, 0.0)  # Blue to red
-        lut.SetSaturationRange(1.0, 1.0)
-        lut.SetValueRange(0.8, 1.0)
-        lut.SetAlphaRange(0.2, 0.8)  # Transparency
-        lut.SetNumberOfTableValues(256)
-        lut.Build()
-        
-        field_mapper.SetLookupTable(lut)
-        field_mapper.SetScalarRange(scalar_range)
-        
-        # Create field actor
-        self.field_actor = vtk.vtkActor()
-        self.field_actor.SetMapper(field_mapper)
-        self.field_actor.GetProperty().SetOpacity(0.4)  # Semi-transparent
-        
-        # For point clouds, make points larger
-        if self.vtk_data.GetNumberOfCells() == self.vtk_data.GetNumberOfPoints():
-            # Likely a point cloud
-            self.field_actor.GetProperty().SetPointSize(3.0)
-            self.field_actor.GetProperty().SetRenderPointsAsSpheres(True)
-        
-        self.renderer.AddActor(self.field_actor)
-        
-        # Setup scalar bar
-        if hasattr(self, 'scalar_bar'):
-            self.renderer.RemoveActor2D(self.scalar_bar)
+        # Check mapper
+        mapper = self.field_actor.GetMapper()
+        if mapper:
+            print("Mapper exists")
+            input_data = mapper.GetInput()
+            if input_data:
+                print(f"Mapper input: {input_data.GetNumberOfPoints()} points")
+                scalar_range = mapper.GetScalarRange()
+                print(f"Mapper scalar range: {scalar_range}")
+            else:
+                print("No input data on mapper!")
+        else:
+            print("No mapper on field actor!")
             
-        self.scalar_bar = vtk.vtkScalarBarActor()
-        self.scalar_bar.SetLookupTable(lut)
-        self.scalar_bar.SetTitle(scalar_array.GetName())
-        self.scalar_bar.SetPosition(0.85, 0.1)
-        self.scalar_bar.SetWidth(0.12)
-        self.scalar_bar.SetHeight(0.8)
+        # Check properties
+        prop = self.field_actor.GetProperty()
+        print(f"Opacity: {prop.GetOpacity()}")
+        print(f"Point size: {prop.GetPointSize()}")
+        print(f"Color: {prop.GetColor()}")
+        print(f"Representation: {prop.GetRepresentation()}")
         
-        # Improve scalar bar appearance
-        self.scalar_bar.SetNumberOfLabels(8)
-        self.scalar_bar.GetLabelTextProperty().SetColor(1, 1, 1)
-        self.scalar_bar.GetTitleTextProperty().SetColor(1, 1, 1)
-        self.scalar_bar.GetTitleTextProperty().SetFontSize(12)
+        # Check visibility
+        print(f"Visibility: {self.field_actor.GetVisibility()}")
         
-        self.renderer.AddActor2D(self.scalar_bar)
-        
-        # Reset camera to show data
-        self.renderer.ResetCamera()
-        
-        # Render
-        self.vtk_widget.GetRenderWindow().Render()
-        
-        print("Field visualization setup complete")
+        print("=========================\n")
+            
+    def setup_scalar_bar(self, lut, scalar_name):
+        """Setup or update scalar bar - FIXED VERSION"""
+        try:
+            # Remove existing scalar bar
+            if hasattr(self, 'scalar_bar') and self.scalar_bar:
+                self.renderer.RemoveViewProp(self.scalar_bar)  # Use RemoveViewProp instead of deprecated AddActor2D
+                
+            self.scalar_bar = vtk.vtkScalarBarActor()
+            self.scalar_bar.SetLookupTable(lut)
+            self.scalar_bar.SetTitle(scalar_name or "Field Value")
+            self.scalar_bar.SetPosition(0.85, 0.1)
+            self.scalar_bar.SetWidth(0.12)
+            self.scalar_bar.SetHeight(0.8)
+            
+            # Improve scalar bar appearance
+            self.scalar_bar.SetNumberOfLabels(6)
+            self.scalar_bar.GetLabelTextProperty().SetColor(1, 1, 1)
+            self.scalar_bar.GetTitleTextProperty().SetColor(1, 1, 1)
+            self.scalar_bar.GetTitleTextProperty().SetFontSize(12)
+            self.scalar_bar.GetLabelTextProperty().SetFontSize(10)
+            
+            # Use AddViewProp instead of deprecated AddActor2D
+            self.renderer.AddViewProp(self.scalar_bar)
+            print("Scalar bar added successfully")
+            
+        except Exception as e:
+            print(f"Error setting up scalar bar: {e}")
         
     def load_orbital_data(self):
         """Load orbital CSV data"""
