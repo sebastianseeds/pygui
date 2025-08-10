@@ -483,7 +483,7 @@ class ElectronFluxVisualizer(QMainWindow):
         self.create_earth_representation()
 
     def setup_visualization_controls(self):
-        """Add ParaView-inspired visualization controls - FIXED VERSION"""
+        """Enhanced controls with adjustable point density"""
         
         # Find the control layout
         control_layout = None
@@ -513,21 +513,56 @@ class ElectronFluxVisualizer(QMainWindow):
             "Surface with Edges",
             "Slice Planes"
         ])
-        self.viz_mode_combo.setCurrentText("Point Cloud")  # Safe default
+        self.viz_mode_combo.setCurrentText("Point Cloud")
         self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
         mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
+        
+        # NEW: Point Density Control
+        density_layout = QHBoxLayout()
+        self.point_density_slider = QSlider(Qt.Orientation.Horizontal)
+        self.point_density_slider.setRange(500, 10000)  # 500 to 10,000 points
+        self.point_density_slider.setValue(5000)  # Default 5,000 points
+        self.point_density_slider.setTickInterval(500)
+        self.point_density_slider.valueChanged.connect(self.update_point_density)
+        self.point_density_label = QLabel("5000")
+        self.point_density_label.setMinimumWidth(50)
+        density_layout.addWidget(self.point_density_slider)
+        density_layout.addWidget(self.point_density_label)
+        mode_layout.addRow("Point Density:", density_layout)
+        
+        # Performance warning
+        perf_warning = QLabel("Higher density = better detail but slower updates")
+        perf_warning.setStyleSheet("color: #888; font-size: 10px;")
+        mode_layout.addRow("", perf_warning)
         
         # Opacity control
         opacity_layout = QHBoxLayout()
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(0, 100)
-        self.opacity_slider.setValue(40)
+        self.opacity_slider.setValue(70)
         self.opacity_slider.valueChanged.connect(self.update_opacity)
-        self.opacity_label = QLabel("40%")
+        self.opacity_label = QLabel("70%")
         self.opacity_label.setMinimumWidth(40)
         opacity_layout.addWidget(self.opacity_slider)
         opacity_layout.addWidget(self.opacity_label)
         mode_layout.addRow("Opacity:", opacity_layout)
+        
+        # Point Size control
+        point_size_layout = QHBoxLayout()
+        self.point_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.point_size_slider.setRange(100, 800)
+        self.point_size_slider.setValue(400)
+        self.point_size_slider.valueChanged.connect(self.update_point_size)
+        self.point_size_label = QLabel("400m")
+        self.point_size_label.setMinimumWidth(50)
+        point_size_layout.addWidget(self.point_size_slider)
+        point_size_layout.addWidget(self.point_size_label)
+        mode_layout.addRow("Point Size:", point_size_layout)
+        
+        # Performance tip for point size
+        size_tip = QLabel("Tip: Fewer points = faster updates")
+        size_tip.setStyleSheet("color: #888; font-size: 10px;")
+        mode_layout.addRow("", size_tip)
         
         # Color map selection
         self.colormap_combo = QComboBox()
@@ -544,51 +579,8 @@ class ElectronFluxVisualizer(QMainWindow):
         
         viz_layout.addLayout(mode_layout)
         
-        # Threshold controls
-        threshold_group = QGroupBox("Threshold Controls")
-        threshold_layout = QFormLayout(threshold_group)
-        
-        self.threshold_enabled = QCheckBox("Enable Thresholding")
-        self.threshold_enabled.toggled.connect(self.toggle_threshold)
-        threshold_layout.addRow(self.threshold_enabled)
-        
-        # Min threshold
-        min_threshold_layout = QHBoxLayout()
-        self.threshold_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.threshold_min_slider.setRange(0, 100)
-        self.threshold_min_slider.setValue(10)
-        self.threshold_min_slider.valueChanged.connect(self.update_threshold)
-        min_threshold_layout.addWidget(self.threshold_min_slider)
-        min_threshold_layout.addWidget(QLabel("10%"))
-        threshold_layout.addRow("Min Threshold:", min_threshold_layout)
-        
-        # Max threshold
-        max_threshold_layout = QHBoxLayout()
-        self.threshold_max_slider = QSlider(Qt.Orientation.Horizontal) 
-        self.threshold_max_slider.setRange(0, 100)
-        self.threshold_max_slider.setValue(90)
-        self.threshold_max_slider.valueChanged.connect(self.update_threshold)
-        max_threshold_layout.addWidget(self.threshold_max_slider)
-        max_threshold_layout.addWidget(QLabel("90%"))
-        threshold_layout.addRow("Max Threshold:", max_threshold_layout)
-        
-        viz_layout.addWidget(threshold_group)
-        
-        # Isosurface controls
-        iso_group = QGroupBox("Isosurface Controls")
-        iso_layout = QFormLayout(iso_group)
-        
-        self.isosurface_enabled = QCheckBox("Show Isosurfaces")
-        self.isosurface_enabled.toggled.connect(self.toggle_isosurfaces)
-        iso_layout.addRow(self.isosurface_enabled)
-        
-        self.num_isosurfaces_spin = QSpinBox()
-        self.num_isosurfaces_spin.setRange(1, 10)
-        self.num_isosurfaces_spin.setValue(3)
-        self.num_isosurfaces_spin.valueChanged.connect(self.update_isosurfaces)
-        iso_layout.addRow("Number of Isosurfaces:", self.num_isosurfaces_spin)
-        
-        viz_layout.addWidget(iso_group)
+        # Rest of your existing controls (threshold, isosurface, etc.)
+        # ... keep your existing threshold and isosurface controls here ...
         
         # Insert into main control layout
         if insert_index >= 0:
@@ -596,6 +588,225 @@ class ElectronFluxVisualizer(QMainWindow):
         else:
             control_layout.addWidget(viz_group)
 
+    def update_point_density(self, density):
+        """Update the number of points displayed"""
+        self.point_density_label.setText(str(density))
+        
+        # Only regenerate if we're in point cloud mode
+        if (hasattr(self, 'viz_mode_combo') and 
+            self.viz_mode_combo.currentText() == "Point Cloud" and
+            hasattr(self, 'vtk_data') and self.vtk_data):
+            
+            print(f"Updating point density to {density} points...")
+            
+            # Use a timer to debounce for performance
+            if hasattr(self, '_density_update_timer'):
+                self._density_update_timer.stop()
+                
+            self._density_update_timer = QTimer()
+            self._density_update_timer.setSingleShot(True)
+            self._density_update_timer.timeout.connect(lambda: self._regenerate_point_cloud(density))
+            self._density_update_timer.start(200)  # 200ms delay
+
+    def _regenerate_point_cloud(self, density):
+        """Regenerate point cloud with new density"""
+        try:
+            print(f"Regenerating point cloud with {density} points...")
+            
+            # Store the new target density
+            self.target_point_count = density
+            
+            # Clear existing field visualization
+            self.clear_field_visualization()
+            
+            # Regenerate point cloud
+            self.setup_point_cloud_rendering()
+            
+            # Force render
+            self.vtk_widget.GetRenderWindow().Render()
+            
+        except Exception as e:
+            print(f"Error regenerating point cloud: {e}")
+
+    def setup_point_cloud_rendering(self):
+        """Enhanced point cloud with adjustable density"""
+        if not self.vtk_data:
+            return
+            
+        print("Setting up point cloud rendering...")
+        
+        try:
+            # Get scalar data
+            scalar_array = self.vtk_data.GetPointData().GetScalars()
+            if not scalar_array:
+                print("No scalar data for point cloud")
+                return
+                
+            scalar_range = scalar_array.GetRange()
+            num_points = self.vtk_data.GetNumberOfPoints()
+            print(f"Point cloud: {num_points} points, range: {scalar_range}")
+            
+            # Store values
+            self.current_scalar_range = scalar_range
+            
+            # Get target density from slider
+            target_density = getattr(self, 'target_point_count', 
+                                   self.point_density_slider.value() if hasattr(self, 'point_density_slider') else 5000)
+            
+            print(f"Target density: {target_density} points")
+            
+            # Analyze data distribution for smart thresholding
+            print("Analyzing data distribution...")
+            non_zero_count = 0
+            sample_size = min(1000, scalar_array.GetSize())
+            
+            for i in range(sample_size):
+                if scalar_array.GetValue(i) > 0:
+                    non_zero_count += 1
+                    
+            non_zero_fraction = non_zero_count / sample_size
+            print(f"Non-zero values: {non_zero_count}/{sample_size} ({non_zero_fraction:.1%})")
+            
+            # Adaptive threshold
+            if non_zero_fraction > 0.5:
+                threshold_fraction = 0.02  # 2% for dense data
+            elif non_zero_fraction > 0.1:
+                threshold_fraction = 0.005  # 0.5% for medium data
+            else:
+                threshold_fraction = 0.001  # 0.1% for sparse data
+            
+            # Apply threshold
+            threshold = vtk.vtkThreshold()
+            threshold.SetInputData(self.vtk_data)
+            threshold_value = scalar_range[1] * threshold_fraction
+            threshold.SetLowerThreshold(threshold_value)
+            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+            threshold.Update()
+            
+            significant_data = threshold.GetOutput()
+            significant_points = significant_data.GetNumberOfPoints()
+            print(f"Significant points (>{threshold_value:.2e}): {significant_points}")
+            
+            # Fallback to lower thresholds if needed
+            if significant_points == 0:
+                for lower_fraction in [0.001, 0.0001, 0.0]:
+                    threshold_value = scalar_range[1] * lower_fraction if lower_fraction > 0 else 0
+                    threshold.SetLowerThreshold(threshold_value)
+                    threshold.Update()
+                    significant_data = threshold.GetOutput()
+                    significant_points = significant_data.GetNumberOfPoints()
+                    if significant_points > 0 or lower_fraction == 0:
+                        break
+                        
+                if significant_points == 0:
+                    significant_data = self.vtk_data
+                    significant_points = num_points
+            
+            # Subsample to target density
+            if significant_points > target_density:
+                print(f"Subsampling {significant_points} -> {target_density} points")
+                mask = vtk.vtkMaskPoints()
+                mask.SetInputData(significant_data)
+                mask.SetMaximumNumberOfPoints(target_density)
+                mask.SetRandomMode(True)
+                mask.Update()
+                final_data = mask.GetOutput()
+            else:
+                final_data = significant_data
+                
+            final_count = final_data.GetNumberOfPoints()
+            print(f"Final point count: {final_count}")
+            
+            if final_count == 0:
+                print("ERROR: No points to visualize!")
+                return
+            
+            # Add jitter and create visualization
+            jittered_data = self.add_spatial_jitter(final_data)
+            self.current_final_data = jittered_data
+            
+            # Create glyphs
+            initial_radius = self.point_size_slider.value() if hasattr(self, 'point_size_slider') else 400
+            self.create_point_cloud_glyphs(jittered_data, initial_radius)
+            
+            print(f"Point cloud complete: {final_count} spheres")
+            
+        except Exception as e:
+            print(f"Point cloud rendering failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def update_point_size(self, value):
+        """Update point size for point cloud visualization"""
+        radius_m = value  # Slider value is in meters
+        self.point_size_label.setText(f"{radius_m}m")
+        
+        # Only update if we're in point cloud mode and have a field actor
+        if (self.viz_mode_combo.currentText() == "Point Cloud" and 
+            hasattr(self, 'field_actor') and self.field_actor):
+            
+            print(f"Updating point size to {radius_m}m radius")
+            
+            # Re-create the point cloud with new size
+            self.update_point_cloud_size(radius_m)
+
+    def update_point_cloud_size(self, radius_m):
+        """Fast point cloud size update - OPTIMIZED"""
+        if not hasattr(self, 'current_final_data') or not self.current_final_data:
+            return
+            
+        # Use a timer to debounce rapid slider changes
+        if hasattr(self, '_size_update_timer'):
+            self._size_update_timer.stop()
+            
+        self._size_update_timer = QTimer()
+        self._size_update_timer.setSingleShot(True)
+        self._size_update_timer.timeout.connect(lambda: self._do_size_update(radius_m))
+        self._size_update_timer.start(50)  # 50ms delay to debounce
+
+    def _do_size_update(self, radius_m):
+        """Actually perform the size update"""
+        try:
+            print(f"Updating to radius {radius_m}m...")
+            
+            # Quick method: just update the sphere source if possible
+            if (hasattr(self, 'field_actor') and self.field_actor and 
+                hasattr(self, 'current_sphere_source')):
+                
+                # Try to update existing sphere source
+                self.current_sphere_source.SetRadius(radius_m)
+                self.current_sphere_source.Modified()
+                
+            else:
+                # Fallback: recreate glyphs (slower but more reliable)
+                self.create_point_cloud_glyphs(self.current_final_data, radius_m)
+            
+            # Force render
+            self.vtk_widget.GetRenderWindow().Render()
+            
+        except Exception as e:
+            print(f"Error in size update: {e}")
+            # Fallback to full recreation
+            self.create_point_cloud_glyphs(self.current_final_data, radius_m)
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def update_threshold_display(self):
+        """Update threshold labels without applying"""
+        min_val = self.threshold_min_slider.value()
+        max_val = self.threshold_max_slider.value()
+        self.threshold_min_label.setText(f"{min_val}%")
+        self.threshold_max_label.setText(f"{max_val}%")
+
+    def apply_threshold_filter(self):
+        """Apply threshold filter to current visualization"""
+        if self.viz_mode_combo.currentText() == "Point Cloud":
+            # For point cloud, just update with current threshold
+            current_size = self.point_size_slider.value()
+            self.update_point_cloud_size(current_size)
+        else:
+            # For other modes, use existing threshold logic
+            self.update_threshold()
+            
     def change_visualization_mode(self, mode):
         """Change the field visualization mode - FIXED WITH DEBUGGING"""
         if not self.vtk_data:
@@ -826,85 +1037,248 @@ class ElectronFluxVisualizer(QMainWindow):
             print(f"Isosurface rendering failed: {e}")
             self.setup_point_cloud_rendering()
 
-    def setup_point_cloud_rendering(self):
-        """TRUE point cloud rendering with visible spheres"""
-        if not self.vtk_data:
-            return
+    # def setup_point_cloud_rendering(self):
+    #     """Fixed point cloud with better threshold logic"""
+    #     if not self.vtk_data:
+    #         return
             
-        print("Setting up TRUE point cloud rendering...")
+    #     print("Setting up optimized point cloud rendering...")
+        
+    #     try:
+    #         # Get scalar data
+    #         scalar_array = self.vtk_data.GetPointData().GetScalars()
+    #         if not scalar_array:
+    #             print("No scalar data for point cloud")
+    #             return
+                
+    #         scalar_range = scalar_array.GetRange()
+    #         num_points = self.vtk_data.GetNumberOfPoints()
+    #         print(f"Point cloud: {num_points} points, range: {scalar_range}")
+            
+    #         # Store these values for later use
+    #         self.current_scalar_range = scalar_range
+            
+    #         # Better threshold logic - check the data distribution first
+    #         print("Analyzing data distribution...")
+    #         non_zero_count = 0
+    #         sample_size = min(1000, scalar_array.GetSize())
+            
+    #         for i in range(sample_size):
+    #             if scalar_array.GetValue(i) > 0:
+    #                 non_zero_count += 1
+                    
+    #         non_zero_fraction = non_zero_count / sample_size
+    #         print(f"Non-zero values in sample: {non_zero_count}/{sample_size} ({non_zero_fraction:.1%})")
+            
+    #         # Adaptive threshold based on data distribution
+    #         if non_zero_fraction > 0.5:
+    #             # Most data is non-zero, use higher threshold
+    #             threshold_fraction = 0.05  # 5%
+    #         elif non_zero_fraction > 0.1:
+    #             # Some data is non-zero, use medium threshold  
+    #             threshold_fraction = 0.01  # 1%
+    #         else:
+    #             # Most data is zero, use very low threshold
+    #             threshold_fraction = 0.001  # 0.1%
+            
+    #         self.original_threshold_fraction = threshold_fraction
+            
+    #         # Apply threshold
+    #         threshold = vtk.vtkThreshold()
+    #         threshold.SetInputData(self.vtk_data)
+    #         threshold_value = scalar_range[1] * threshold_fraction
+    #         print(f"Using threshold: {threshold_value:.2e} ({threshold_fraction:.1%} of max)")
+            
+    #         threshold.SetLowerThreshold(threshold_value)
+    #         threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+    #         threshold.Update()
+            
+    #         significant_data = threshold.GetOutput()
+    #         significant_points = significant_data.GetNumberOfPoints()
+    #         print(f"Significant flux points: {significant_points}")
+            
+    #         # If still no points, try progressively lower thresholds
+    #         if significant_points == 0:
+    #             print("No points found, trying lower thresholds...")
+                
+    #             for lower_fraction in [0.001, 0.0001, 0.00001, 0.0]:
+    #                 threshold_value = scalar_range[1] * lower_fraction
+    #                 threshold.SetLowerThreshold(threshold_value)
+    #                 threshold.Update()
+    #                 significant_data = threshold.GetOutput()
+    #                 significant_points = significant_data.GetNumberOfPoints()
+    #                 print(f"  Threshold {threshold_value:.2e}: {significant_points} points")
+                    
+    #                 if significant_points > 0:
+    #                     self.original_threshold_fraction = lower_fraction
+    #                     break
+                        
+    #             # If still nothing, use all data
+    #             if significant_points == 0:
+    #                 print("Using all data (no threshold)")
+    #                 significant_data = self.vtk_data
+    #                 significant_points = num_points
+    #                 self.original_threshold_fraction = 0.0
+            
+    #         # Subsample for performance
+    #         target_points = 2000
+    #         if significant_points > target_points:
+    #             print(f"Subsampling to {target_points} points for performance...")
+    #             mask = vtk.vtkMaskPoints()
+    #             mask.SetInputData(significant_data)
+    #             mask.SetMaximumNumberOfPoints(target_points)
+    #             mask.SetRandomMode(True)
+    #             mask.Update()
+    #             final_data = mask.GetOutput()
+    #         else:
+    #             final_data = significant_data
+                
+    #         final_point_count = final_data.GetNumberOfPoints()
+    #         print(f"Final point count: {final_point_count}")
+            
+    #         if final_point_count == 0:
+    #             print("ERROR: No points to visualize!")
+    #             return
+            
+    #         # Add jitter to break up grid artifacts
+    #         jittered_data = self.add_spatial_jitter(final_data)
+            
+    #         # Store for later updates
+    #         self.current_final_data = jittered_data
+            
+    #         # Create initial visualization
+    #         initial_radius = self.point_size_slider.value() if hasattr(self, 'point_size_slider') else 400
+    #         self.create_point_cloud_glyphs(jittered_data, initial_radius)
+            
+    #         print(f"Point cloud setup complete: {jittered_data.GetNumberOfPoints()} visible spheres")
+            
+    #     except Exception as e:
+    #         print(f"Point cloud rendering failed: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+
+    def add_spatial_jitter(self, input_data):
+        """Add random spatial jitter to break up grid artifacts"""
+        if input_data.GetNumberOfPoints() == 0:
+            print("No points to jitter")
+            return input_data
+            
+        print("Adding spatial jitter to reduce grid artifacts...")
         
         try:
-            # Get scalar data
-            scalar_array = self.vtk_data.GetPointData().GetScalars()
-            if not scalar_array:
-                print("No scalar data for point cloud")
-                return
+            # Get the spacing of the original structured grid
+            jitter_radius = 300.0  # km
+            
+            # Create a new points array with jitter
+            original_points = input_data.GetPoints()
+            n_points = original_points.GetNumberOfPoints()
+            
+            jittered_points = vtk.vtkPoints()
+            
+            import random
+            random.seed(42)  # Reproducible jitter
+            
+            for i in range(n_points):
+                # Get original point
+                orig_point = original_points.GetPoint(i)
                 
-            scalar_range = scalar_array.GetRange()
-            num_points = self.vtk_data.GetNumberOfPoints()
-            print(f"Point cloud: {num_points} points, range: {scalar_range}")
+                # Add random jitter in all three dimensions
+                jitter_x = (random.random() - 0.5) * 2 * jitter_radius
+                jitter_y = (random.random() - 0.5) * 2 * jitter_radius  
+                jitter_z = (random.random() - 0.5) * 2 * jitter_radius
+                
+                # Create jittered point
+                new_point = [
+                    orig_point[0] + jitter_x,
+                    orig_point[1] + jitter_y,
+                    orig_point[2] + jitter_z
+                ]
+                
+                jittered_points.InsertNextPoint(new_point)
             
-            # Only show points with significant flux values
-            threshold = vtk.vtkThreshold()
-            threshold.SetInputData(self.vtk_data)
-            threshold.SetLowerThreshold(scalar_range[1] * 0.05)  # Show points > 5% of max flux
-            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
-            threshold.Update()
+            # Create new polydata with jittered points
+            jittered_polydata = vtk.vtkPolyData()
+            jittered_polydata.SetPoints(jittered_points)
             
-            significant_data = threshold.GetOutput()
-            significant_points = significant_data.GetNumberOfPoints()
-            print(f"Significant flux points: {significant_points}")
+            # Copy scalar data
+            jittered_polydata.GetPointData().SetScalars(input_data.GetPointData().GetScalars())
             
-            if significant_points == 0:
-                print("No significant points found, showing all data")
-                significant_data = self.vtk_data
-                significant_points = num_points
+            # Create vertices
+            vertices = vtk.vtkCellArray()
+            for i in range(n_points):
+                vertex = vtk.vtkVertex()
+                vertex.GetPointIds().SetId(0, i)
+                vertices.InsertNextCell(vertex)
+            jittered_polydata.SetVerts(vertices)
             
-            # Subsample if too many points
-            if significant_points > 5000:
-                print("Subsampling for performance...")
-                mask = vtk.vtkMaskPoints()
-                mask.SetInputData(significant_data)
-                mask.SetMaximumNumberOfPoints(3000)
-                mask.SetRandomMode(True)
-                mask.Update()
-                final_data = mask.GetOutput()
-                print(f"Subsampled to {final_data.GetNumberOfPoints()} points")
-            else:
-                final_data = significant_data
+            print(f"Applied jitter to {n_points} points (±{jitter_radius}km)")
+            return jittered_polydata
             
-            # Create spherical glyphs
+        except Exception as e:
+            print(f"Error adding jitter: {e}")
+            return input_data  # Return original if jitter fails
+
+    def create_point_cloud_glyphs(self, point_data, radius):
+        """Create the actual glyph visualization"""
+        if point_data.GetNumberOfPoints() == 0:
+            print("No points to create glyphs for")
+            return
+            
+        try:
+            print(f"Creating glyphs for {point_data.GetNumberOfPoints()} points...")
+            
+            # Use simpler spheres for better performance
             sphere = vtk.vtkSphereSource()
-            sphere.SetRadius(400)  # Large 400km radius for visibility
-            sphere.SetThetaResolution(10)
-            sphere.SetPhiResolution(10)
+            sphere.SetRadius(radius)
+            sphere.SetThetaResolution(8)  # Reduced for performance
+            sphere.SetPhiResolution(8)    # Reduced for performance
             
+            # Store sphere source for potential fast updates
+            self.current_sphere_source = sphere
+            
+            # Create glyph
             glyph = vtk.vtkGlyph3D()
-            glyph.SetInputData(final_data)
+            glyph.SetInputData(point_data)
             glyph.SetSourceConnection(sphere.GetOutputPort())
             glyph.SetScaleModeToDataScalingOff()
             glyph.SetColorModeToColorByScalar()
             glyph.Update()
             
+            print(f"Glyph filter created {glyph.GetOutput().GetNumberOfPoints()} glyph points")
+            
             # Create mapper
             glyph_mapper = vtk.vtkPolyDataMapper()
             glyph_mapper.SetInputConnection(glyph.GetOutputPort())
-            glyph_mapper.SetScalarRange(scalar_range)
+            glyph_mapper.SetScalarRange(self.current_scalar_range)
             glyph_mapper.ScalarVisibilityOn()
             
             # Setup lookup table
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
+            lut = self.create_lookup_table(self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red')
             glyph_mapper.SetLookupTable(lut)
             
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(glyph_mapper)
-            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            # Create or update actor
+            if hasattr(self, 'field_actor') and self.field_actor:
+                # Update existing actor
+                self.field_actor.SetMapper(glyph_mapper)
+            else:
+                # Create new actor
+                self.field_actor = vtk.vtkActor()
+                self.field_actor.SetMapper(glyph_mapper)
+                self.renderer.AddActor(self.field_actor)
             
-            self.renderer.AddActor(self.field_actor)
-            print(f"Point cloud setup complete: {final_data.GetNumberOfPoints()} visible spheres")
+            # Set opacity
+            opacity = self.opacity_slider.value() / 100.0 if hasattr(self, 'opacity_slider') else 0.7
+            self.field_actor.GetProperty().SetOpacity(opacity)
+            
+            # Setup scalar bar
+            if hasattr(self, 'current_scalar_range'):
+                scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
+                self.setup_scalar_bar(lut, scalar_name)
+            
+            print(f"Glyphs created successfully: {point_data.GetNumberOfPoints()} spheres, radius {radius}m")
             
         except Exception as e:
-            print(f"Point cloud rendering failed: {e}")
+            print(f"Error creating glyphs: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1667,85 +2041,75 @@ class ElectronFluxVisualizer(QMainWindow):
         print(f"Created default scalar field with {len(scalar_values)} values")
 
     def setup_field_visualization(self):
-        """Setup field visualization - WORKING POINT CLOUD VERSION"""
+        """Setup field visualization - ENHANCED TO STORE DATA"""
         if not self.vtk_data:
             print("ERROR: No VTK data for field visualization")
             return
             
         print("Setting up field visualization...")
         
-        try:
-            # Get scalar data
-            scalar_array = self.vtk_data.GetPointData().GetScalars()
-            if not scalar_array:
-                print("ERROR: No scalar data for visualization")
-                return
+        # Determine if we should use point cloud as default
+        current_mode = self.viz_mode_combo.currentText() if hasattr(self, 'viz_mode_combo') else "Point Cloud"
+        
+        if current_mode == "Point Cloud":
+            self.setup_point_cloud_rendering()
+        else:
+            # Use the existing field setup for other modes
+            try:
+                scalar_array = self.vtk_data.GetPointData().GetScalars()
+                if not scalar_array:
+                    print("ERROR: No scalar data for visualization")
+                    return
+                    
+                scalar_range = scalar_array.GetRange()
+                print(f"Scalar range: {scalar_range[0]:.2e} to {scalar_range[1]:.2e}")
                 
-            scalar_range = scalar_array.GetRange()
-            print(f"Scalar range: {scalar_range[0]:.2e} to {scalar_range[1]:.2e}")
-            
-            num_points = self.vtk_data.GetNumberOfPoints()
-            print(f"Total points: {num_points}")
-            
-            # Create a threshold filter to only show points with significant flux
-            threshold = vtk.vtkThreshold()
-            threshold.SetInputData(self.vtk_data)
-            threshold.SetLowerThreshold(scalar_range[1] * 0.01)  # Only show points > 1% of max
-            threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
-            threshold.Update()
-            
-            thresholded_data = threshold.GetOutput()
-            print(f"Points with significant flux: {thresholded_data.GetNumberOfPoints()}")
-            
-            if thresholded_data.GetNumberOfPoints() == 0:
-                print("No points above threshold, using all points")
-                # Use all points if threshold removes everything
-                thresholded_data = self.vtk_data
-            
-            # Convert to polydata with spheres for each point
-            sphere = vtk.vtkSphereSource()
-            sphere.SetRadius(300)  # 300 km radius spheres
-            sphere.SetThetaResolution(8)
-            sphere.SetPhiResolution(8)
-            
-            glyph = vtk.vtkGlyph3D()
-            glyph.SetInputData(thresholded_data)
-            glyph.SetSourceConnection(sphere.GetOutputPort())
-            glyph.SetScaleModeToDataScalingOff()  # Fixed size
-            glyph.SetColorModeToColorByScalar()
-            glyph.Update()
-            
-            print(f"Created {glyph.GetOutput().GetNumberOfPoints()} glyph points")
-            
-            # Create mapper
-            field_mapper = vtk.vtkPolyDataMapper()
-            field_mapper.SetInputConnection(glyph.GetOutputPort())
-            field_mapper.SetScalarRange(scalar_range)
-            field_mapper.ScalarVisibilityOn()
-            
-            # Setup lookup table
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
-            field_mapper.SetLookupTable(lut)
-            
-            # Create field actor
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(field_mapper)
-            self.field_actor.GetProperty().SetOpacity(0.7)  # Semi-transparent
-            
-            self.renderer.AddActor(self.field_actor)
-            
-            # Setup scalar bar
-            self.setup_scalar_bar(lut, scalar_array.GetName())
-            
-            # Reset camera to show all data
-            self.renderer.ResetCamera()
-            
-            print("Field visualization setup complete")
-            
-        except Exception as e:
-            print(f"ERROR in setup_field_visualization: {e}")
-            import traceback
-            traceback.print_exc()
+                num_points = self.vtk_data.GetNumberOfPoints()
+                print(f"Total points: {num_points}")
+                
+                # Create a threshold filter to only show points with significant flux
+                threshold = vtk.vtkThreshold()
+                threshold.SetInputData(self.vtk_data)
+                threshold.SetLowerThreshold(scalar_range[1] * 0.01)
+                threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
+                threshold.Update()
+                
+                thresholded_data = threshold.GetOutput()
+                print(f"Points with significant flux: {thresholded_data.GetNumberOfPoints()}")
+                
+                if thresholded_data.GetNumberOfPoints() == 0:
+                    print("No points above threshold, using all points")
+                    thresholded_data = self.vtk_data
+                
+                # Create mapper
+                field_mapper = vtk.vtkDataSetMapper()
+                field_mapper.SetInputData(thresholded_data)
+                field_mapper.SetScalarRange(scalar_range)
+                field_mapper.ScalarVisibilityOn()
+                
+                # Setup lookup table
+                lut = self.create_lookup_table(self.colormap_combo.currentText())
+                field_mapper.SetLookupTable(lut)
+                
+                # Create field actor
+                self.field_actor = vtk.vtkActor()
+                self.field_actor.SetMapper(field_mapper)
+                self.field_actor.GetProperty().SetOpacity(0.7)
+                
+                self.renderer.AddActor(self.field_actor)
+                
+                # Setup scalar bar
+                self.setup_scalar_bar(lut, scalar_array.GetName())
+                
+                # Reset camera
+                self.renderer.ResetCamera()
+                
+                print("Field visualization setup complete")
+                
+            except Exception as e:
+                print(f"ERROR in setup_field_visualization: {e}")
+                import traceback
+                traceback.print_exc()
 
     def debug_field_actor(self):
         """Specific debug for field actor"""
