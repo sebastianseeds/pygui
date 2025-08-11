@@ -355,6 +355,8 @@ class ElectronFluxVisualizer(QMainWindow):
         vtk_layout.addWidget(self.vtk_widget)
         
         splitter.addWidget(vtk_frame)
+
+        self.create_earth_opacity_control(vtk_layout)
         
         # Right panel - controls (WIDER)
         control_panel = QWidget()
@@ -469,13 +471,13 @@ class ElectronFluxVisualizer(QMainWindow):
         self.connect_signals()
         
     def setup_vtk(self):
-        """Setup VTK 3D visualization with enhanced axes and labels"""
+        """Setup VTK 3D visualization - DEBUG VERSION"""
         print("=== SETTING UP VTK RENDERER ===")
         
         # Renderer
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
-        self.renderer.SetBackground(0.05, 0.05, 0.15)  # Dark blue
+        self.renderer.SetBackground(0.05, 0.05, 0.15)  # Dark blue background
         
         # Camera setup for Earth-centered view
         camera = self.renderer.GetActiveCamera()
@@ -485,25 +487,23 @@ class ElectronFluxVisualizer(QMainWindow):
         
         print("Renderer and camera setup complete")
         
-        # Create Earth representation (with debugging)
-        print("About to call create_earth_representation()...")
-        try:
-            self.create_earth_representation()
-            print("create_earth_representation() completed successfully")
-        except Exception as e:
-            print(f"ERROR in create_earth_representation(): {e}")
-            import traceback
-            traceback.print_exc()
+        # Create Earth representation ONCE, with error handling
+        print(">>> About to call create_earth_representation...")
+        earth_success = self.create_earth_representation()
+        print(f">>> create_earth_representation returned: {earth_success} (type: {type(earth_success)})")
         
-        # Add dynamic coordinate axes
-        print("About to setup coordinate axes...")
+        if earth_success:
+            print("Earth created successfully")
+        else:
+            print("WARNING: Earth creation failed, continuing without Earth")
+        
+        # Add coordinate axes
+        print("Setting up coordinate axes...")
         try:
             self.setup_coordinate_axes()
             print("Coordinate axes setup complete")
         except Exception as e:
-            print(f"ERROR in setup_coordinate_axes(): {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"WARNING: Coordinate axes setup failed: {e}")
         
         print("=== VTK SETUP COMPLETE ===")
 
@@ -756,150 +756,733 @@ class ElectronFluxVisualizer(QMainWindow):
         self.vtk_widget.GetRenderWindow().Render()
 
     def create_earth_representation(self):
-        """Create a simple but visible Earth sphere"""
-        print("🌍 CREATING SIMPLE EARTH REPRESENTATION...")
+        """Create Earth with texture, lat/long grid, and opacity control"""
+        print("Creating Earth with texture, grid, and controls...")
         
         try:
-            # Create Earth sphere
+            # Remove existing Earth actors if they exist
+            self.cleanup_existing_earth_actors()
+            
+            # 1. Create Earth sphere
             print("Creating Earth sphere...")
             earth_sphere = vtk.vtkSphereSource()
             earth_sphere.SetRadius(6371.0)  # Earth radius in km
-            earth_sphere.SetThetaResolution(50)
-            earth_sphere.SetPhiResolution(50)
+            earth_sphere.SetThetaResolution(120)  # Higher resolution to reduce artifacts
+            earth_sphere.SetPhiResolution(120)
+            earth_sphere.SetCenter(0.0, 0.0, 0.0)
             earth_sphere.Update()
             
-            print(f"Sphere created with {earth_sphere.GetOutput().GetNumberOfPoints()} points")
+            # 2. Manually add correct texture coordinates
+            sphere_data = earth_sphere.GetOutput()
+            self.add_correct_texture_coordinates(sphere_data)
             
-            # Create mapper
+            # 3. Create mapper directly from sphere data
             earth_mapper = vtk.vtkPolyDataMapper()
-            earth_mapper.SetInputConnection(earth_sphere.GetOutputPort())
+            earth_mapper.SetInputData(sphere_data)
             
-            # Create actor
+            # 4. Create Earth actor
             self.earth_actor = vtk.vtkActor()
             self.earth_actor.SetMapper(earth_mapper)
             
-            # Set a distinctive color so we can see it
-            print("Setting Earth properties...")
-            self.earth_actor.GetProperty().SetColor(0.3, 0.5, 0.8)  # Blue
-            self.earth_actor.GetProperty().SetOpacity(0.6)
-            self.earth_actor.GetProperty().SetAmbient(0.4)  # Make it more visible
+            # 5. Try to load and apply Earth texture
+            earth_texture = self.load_earth_texture()
+            if earth_texture:
+                earth_texture.SetRepeat(0)  # Don't repeat texture
+                earth_texture.SetInterpolate(1)  # Smooth interpolation
+                # Additional settings to reduce artifacts
+                earth_texture.SetWrap(vtk.vtkTexture.ClampToEdge)
+                self.earth_actor.SetTexture(earth_texture)
+                print("Earth texture applied with artifact fixes")
+            else:
+                # Fallback to solid color
+                print("Using fallback solid Earth color")
+                self.earth_actor.GetProperty().SetColor(0.2, 0.5, 0.8)
             
-            # Add to renderer
-            print("Adding Earth to renderer...")
+            # 6. Set Earth properties with default opacity
+            earth_property = self.earth_actor.GetProperty()
+            earth_property.SetOpacity(0.8)  # Default 80% opacity
+            earth_property.SetAmbient(0.4)
+            earth_property.SetDiffuse(0.8)
+            earth_property.SetSpecular(0.05)
+            earth_property.SetSpecularPower(10)
+            
+            self.earth_actor.SetVisibility(True)
             self.renderer.AddActor(self.earth_actor)
             
-            # Verify it was added
-            actors = self.renderer.GetActors()
-            actors.InitTraversal()
-            earth_found = False
-            total_actors = 0
-            while actors.GetNextActor():
-                actor = actors.GetLastActor()
-                total_actors += 1
-                if actor == self.earth_actor:
-                    earth_found = True
-                    
-            print(f"✅ Earth added! Renderer now has {total_actors} actors, Earth found: {earth_found}")
+            # 7. Create latitude lines (every 15 degrees for better coverage)
+            print("Creating latitude grid lines...")
+            self.lat_long_actors = []
             
-            # Force immediate render
-            self.vtk_widget.GetRenderWindow().Render()
+            for lat_deg in range(-75, 90, 15):  # Every 15 degrees, -75 to 75
+                lat_rad = np.radians(lat_deg)
+                radius = 6372.0 * np.cos(lat_rad)  # Slightly above Earth surface
+                height = 6372.0 * np.sin(lat_rad)
+                
+                if radius > 100:  # Skip very small circles near poles
+                    circle = self.create_circle(radius, height, 'lat')
+                    if circle:
+                        self.lat_long_actors.append(circle)
+                        self.renderer.AddActor(circle)
             
-            print("✅ EARTH CREATION COMPLETE!")
+            # 8. Create longitude lines (every 15 degrees for full coverage)
+            print("Creating longitude grid lines...")
+            for lon_deg in range(0, 360, 15):  # Every 15 degrees, full 360°
+                meridian = self.create_meridian(lon_deg)
+                if meridian:
+                    self.lat_long_actors.append(meridian)
+                    self.renderer.AddActor(meridian)
+            
+            # 9. Create highlighted equator and prime meridian
+            print("Creating equator and prime meridian...")
+            self.equator_actor = self.create_circle(6372.5, 0.0, 'equator')
+            if self.equator_actor:
+                self.renderer.AddActor(self.equator_actor)
+            
+            # Create prime meridian (highlighted)
+            self.prime_meridian_actor = self.create_meridian(0, highlight=True)
+            if self.prime_meridian_actor:
+                self.renderer.AddActor(self.prime_meridian_actor)
+            
+            # 10. Add Earth opacity control to UI
+            #self.add_earth_opacity_control()
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+            
+            print("Earth with texture, grid, and opacity control created successfully")
+            return True
             
         except Exception as e:
-            print(f"❌ ERROR creating Earth: {e}")
+            print(f"Error creating enhanced Earth: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def create_earth_opacity_control(self, parent_layout):
+        """Create Earth opacity control and add it to the parent layout"""
+        try:
+            # Create opacity control widget
+            opacity_widget = QWidget()
+            opacity_layout = QHBoxLayout(opacity_widget)
+            opacity_layout.setContentsMargins(10, 5, 10, 5)
+            opacity_layout.setSpacing(10)
+            
+            # Add label
+            opacity_label = QLabel("Earth Opacity:")
+            opacity_label.setStyleSheet("color: white; font-weight: bold;")
+            opacity_layout.addWidget(opacity_label)
+            
+            # Add slider
+            self.earth_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.earth_opacity_slider.setRange(0, 100)
+            self.earth_opacity_slider.setValue(80)  # Default 80%
+            self.earth_opacity_slider.setFixedWidth(150)
+            self.earth_opacity_slider.valueChanged.connect(self.update_earth_opacity)
+            opacity_layout.addWidget(self.earth_opacity_slider)
+            
+            # Add value label
+            self.earth_opacity_value_label = QLabel("80%")
+            self.earth_opacity_value_label.setStyleSheet("color: white; font-weight: bold; min-width: 35px;")
+            opacity_layout.addWidget(self.earth_opacity_value_label)
+            
+            # Add spacer
+            opacity_layout.addStretch()
+            
+            # Style the widget
+            opacity_widget.setStyleSheet("""
+                QWidget {
+                    background-color: rgba(40, 40, 40, 180);
+                    border: 1px solid #555;
+                    border-radius: 5px;
+                    margin: 2px;
+                }
+                QSlider::groove:horizontal {
+                    border: 1px solid #666;
+                    height: 6px;
+                    background: #333;
+                    border-radius: 3px;
+                }
+                QSlider::handle:horizontal {
+                    background: #888;
+                    border: 1px solid #555;
+                    width: 16px;
+                    margin: -5px 0;
+                    border-radius: 8px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #aaa;
+                }
+            """)
+            
+            opacity_widget.setFixedHeight(35)
+            
+            # Add to parent layout
+            parent_layout.addWidget(opacity_widget)
+            
+            print("Earth opacity control created successfully")
+            
+        except Exception as e:
+            print(f"Error creating Earth opacity control: {e}")
+
+    def update_earth_opacity(self, value):
+        """Update Earth opacity from slider"""
+        try:
+            opacity = value / 100.0
+            self.earth_opacity_value_label.setText(f"{value}%")
+            
+            if hasattr(self, 'earth_actor') and self.earth_actor:
+                self.earth_actor.GetProperty().SetOpacity(opacity)
+                
+                # Also update grid line opacity proportionally
+                grid_opacity = min(0.8, opacity + 0.2)  # Keep grid slightly more visible
+                
+                if hasattr(self, 'lat_long_actors'):
+                    for actor in self.lat_long_actors:
+                        if actor:
+                            actor.GetProperty().SetOpacity(grid_opacity * 0.6)
+                
+                if hasattr(self, 'equator_actor') and self.equator_actor:
+                    self.equator_actor.GetProperty().SetOpacity(grid_opacity * 0.8)
+                    
+                if hasattr(self, 'prime_meridian_actor') and self.prime_meridian_actor:
+                    self.prime_meridian_actor.GetProperty().SetOpacity(grid_opacity * 0.8)
+                
+                # Force render
+                if hasattr(self, 'vtk_widget'):
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+        except Exception as e:
+            print(f"Error updating Earth opacity: {e}")
+        
+    def create_meridian(self, longitude_deg, highlight=False):
+        """Create a meridian (longitude line) from pole to pole"""
+        try:
+            lon_rad = np.radians(longitude_deg)
+            
+            # Create points from south pole to north pole
+            n_points = 120  # Higher resolution for smoother lines
+            latitudes = np.linspace(-np.pi/2, np.pi/2, n_points)
+            
+            points = vtk.vtkPoints()
+            lines = vtk.vtkCellArray()
+            
+            for i, lat in enumerate(latitudes):
+                x = 6372.0 * np.cos(lat) * np.cos(lon_rad)  # 1km above Earth
+                y = 6372.0 * np.cos(lat) * np.sin(lon_rad)
+                z = 6372.0 * np.sin(lat)
+                points.InsertNextPoint(x, y, z)
+                
+                if i > 0:
+                    line = vtk.vtkLine()
+                    line.GetPointIds().SetId(0, i-1)
+                    line.GetPointIds().SetId(1, i)
+                    lines.InsertNextCell(line)
+            
+            # Create polydata
+            meridian_polydata = vtk.vtkPolyData()
+            meridian_polydata.SetPoints(points)
+            meridian_polydata.SetLines(lines)
+            
+            # Create mapper
+            meridian_mapper = vtk.vtkPolyDataMapper()
+            meridian_mapper.SetInputData(meridian_polydata)
+            
+            # Create actor
+            meridian_actor = vtk.vtkActor()
+            meridian_actor.SetMapper(meridian_mapper)
+            
+            # Set properties based on whether it's highlighted
+            if highlight:  # Prime meridian or special meridian
+                meridian_actor.GetProperty().SetColor(1.0, 0.6, 0.0)  # Orange
+                meridian_actor.GetProperty().SetLineWidth(2.5)
+                meridian_actor.GetProperty().SetOpacity(0.8)
+            else:  # Regular meridian
+                meridian_actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray
+                meridian_actor.GetProperty().SetLineWidth(1.5)
+                meridian_actor.GetProperty().SetOpacity(0.6)
+            
+            return meridian_actor
+            
+        except Exception as e:
+            print(f"Error creating meridian at {longitude_deg}°: {e}")
+            return None
+
+    def add_correct_texture_coordinates(self, sphere_data):
+        """Add texture coordinates with proper seam handling to eliminate artifacts"""
+        try:
+            print("Computing texture coordinates with seam artifact fix...")
+            
+            points = sphere_data.GetPoints()
+            num_points = points.GetNumberOfPoints()
+            
+            # Create texture coordinate array
+            tex_coords = vtk.vtkFloatArray()
+            tex_coords.SetNumberOfComponents(2)
+            tex_coords.SetNumberOfTuples(num_points)
+            tex_coords.SetName("TextureCoordinates")
+            
+            for i in range(num_points):
+                # Get 3D point
+                point = points.GetPoint(i)
+                x, y, z = point
+                
+                # Convert to spherical coordinates
+                r = np.sqrt(x*x + y*y + z*z)
+                
+                # Calculate longitude (u coordinate) with special seam handling
+                longitude = np.arctan2(y, x)  # -π to π
+                
+                # Handle the seam at ±π (International Date Line)
+                # This is the key fix for the Pacific artifact
+                if longitude < 0:
+                    longitude += 2 * np.pi  # Convert to 0 to 2π
+                    
+                u = longitude / (2 * np.pi)  # 0 to 1
+                
+                # Add small epsilon to prevent exact 0 or 1 values that cause seams
+                epsilon = 1e-6
+                u = max(epsilon, min(1.0 - epsilon, u))
+                
+                # Calculate latitude (v coordinate)
+                latitude = np.arcsin(np.clip(z / r, -1.0, 1.0))  # -π/2 to π/2
+                
+                # Map latitude to texture coordinates (0 to 1)
+                v = (latitude + np.pi/2) / np.pi  # 0 to 1
+                v = max(epsilon, min(1.0 - epsilon, v))
+                
+                # Set texture coordinates
+                tex_coords.SetTuple2(i, u, v)
+            
+            # Add texture coordinates to the sphere data
+            sphere_data.GetPointData().SetTCoords(tex_coords)
+            print(f"Added seam-fixed texture coordinates for {num_points} points")
+            
+        except Exception as e:
+            print(f"Error computing texture coordinates: {e}")
             import traceback
             traceback.print_exc()
 
+    def load_earth_texture(self):
+        """Load Earth texture with proper handling"""
+        try:
+            # List of possible texture files
+            texture_files = [
+                "earth_texture.jpg", "earth_map.jpg", "world_map.jpg",
+                "earth_texture.png", "earth_map.png", "world_map.png",
+                "blue_marble.jpg", "blue_marble.png",
+                "natural_earth.jpg", "natural_earth.png",
+                "earth.jpg", "earth.png", "world.jpg", "world.png"
+            ]
+            
+            # Try to find and load texture file
+            for filename in texture_files:
+                texture = self.try_load_texture_file(filename)
+                if texture:
+                    print(f"Successfully loaded texture: {filename}")
+                    return texture
+            
+            # If no local file found, create procedural texture
+            print("No texture file found, creating procedural Earth texture...")
+            return self.create_procedural_earth_texture()
+            
+        except Exception as e:
+            print(f"Error loading Earth texture: {e}")
+            return None
+
+    def try_load_texture_file(self, filename):
+        """Try to load a specific texture file with settings to prevent artifacts"""
+        try:
+            import os
+            
+            if not os.path.exists(filename):
+                return None
+            
+            # Create appropriate reader
+            if filename.lower().endswith(('.jpg', '.jpeg')):
+                reader = vtk.vtkJPEGReader()
+            elif filename.lower().endswith('.png'):
+                reader = vtk.vtkPNGReader()
+            else:
+                return None
+            
+            reader.SetFileName(filename)
+            reader.Update()
+            
+            # Check if image loaded
+            if reader.GetOutput().GetNumberOfPoints() == 0:
+                return None
+            
+            # Create texture with specific settings to prevent artifacts
+            texture = vtk.vtkTexture()
+            texture.SetInputConnection(reader.GetOutputPort())
+            texture.InterpolateOn()  # Smooth interpolation
+            texture.RepeatOff()      # Don't repeat - this is crucial
+            texture.EdgeClampOn()    # Clamp edges
+            
+            # Additional settings to prevent seam artifacts
+            texture.SetWrap(vtk.vtkTexture.ClampToEdge)
+            texture.SetQualityTo32Bit()  # Higher quality
+            
+            print(f"Loaded texture {filename} with anti-artifact settings")
+            return texture
+            
+        except Exception as e:
+            print(f"Error loading {filename}: {e}")
+            return None
+
+    def create_procedural_earth_texture(self):
+        """Create a simple procedural Earth texture (improved)"""
+        try:
+            print("Creating improved procedural Earth texture...")
+            
+            # Standard equirectangular dimensions
+            width, height = 1024, 512
+            
+            # Create image data
+            image = vtk.vtkImageData()
+            image.SetDimensions(width, height, 1)
+            image.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 3)  # RGB
+            
+            # Create a simple but recognizable Earth pattern
+            for y in range(height):
+                for x in range(width):
+                    # Convert pixel to lat/lon
+                    lon = (x / width) * 360 - 180  # -180 to 180
+                    lat = 90 - (y / height) * 180   # 90 to -90
+                    
+                    # Simple continent approximation
+                    is_land = self.simple_land_check(lon, lat)
+                    
+                    if is_land:
+                        # Land colors (green/brown with variation)
+                        variation = (x + y) % 50 / 50.0
+                        r = int(80 + variation * 60)   # Brown-green
+                        g = int(100 + variation * 80)  # Green
+                        b = int(40 + variation * 40)   # Minimal blue
+                    else:
+                        # Ocean colors (blue with variation)
+                        variation = (x * 3 + y * 2) % 40 / 40.0
+                        r = int(20 + variation * 30)   # Minimal red
+                        g = int(60 + variation * 60)   # Medium green
+                        b = int(120 + variation * 80)  # Strong blue
+                    
+                    # Clamp values
+                    r = max(0, min(255, r))
+                    g = max(0, min(255, g))
+                    b = max(0, min(255, b))
+                    
+                    # Set pixel
+                    image.SetScalarComponentFromFloat(x, y, 0, 0, r)
+                    image.SetScalarComponentFromFloat(x, y, 0, 1, g)
+                    image.SetScalarComponentFromFloat(x, y, 0, 2, b)
+            
+            # Create texture
+            texture = vtk.vtkTexture()
+            texture.SetInputData(image)
+            texture.InterpolateOn()
+            texture.RepeatOff()
+            texture.EdgeClampOn()
+            
+            print("Procedural Earth texture created")
+            return texture
+            
+        except Exception as e:
+            print(f"Error creating procedural texture: {e}")
+            return None
+
+    def simple_land_check(self, lon, lat):
+        """Simple land/ocean check for procedural texture"""
+        # Very simplified continent shapes
+        # North America
+        if (-140 < lon < -60 and 15 < lat < 70):
+            return True
+        # South America  
+        if (-80 < lon < -35 and -55 < lat < 15):
+            return True
+        # Africa
+        if (-20 < lon < 50 and -35 < lat < 35):
+            return True
+        # Europe
+        if (-10 < lon < 40 and 35 < lat < 70):
+            return True
+        # Asia
+        if (40 < lon < 180 and 10 < lat < 75):
+            return True
+        # Australia
+        if (110 < lon < 155 and -45 < lat < -10):
+            return True
+        
+        return False
+
+    # def add_earth_opacity_control(self):
+    #     """Add Earth opacity control below the visualization"""
+    #     try:
+    #         # Find the main layout that contains the VTK widget
+    #         vtk_frame = self.vtk_widget.parent()
+    #         vtk_layout = vtk_frame.layout()
+            
+    #         # Create opacity control widget
+    #         opacity_control = QWidget()
+    #         opacity_layout = QHBoxLayout(opacity_control)
+    #         opacity_layout.setContentsMargins(10, 5, 10, 5)
+            
+    #         # Add label
+    #         opacity_label = QLabel("Earth Opacity:")
+    #         opacity_layout.addWidget(opacity_label)
+            
+    #         # Add slider
+    #         self.earth_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+    #         self.earth_opacity_slider.setRange(0, 100)
+    #         self.earth_opacity_slider.setValue(80)  # Default 80%
+    #         self.earth_opacity_slider.setMaximumWidth(200)
+    #         self.earth_opacity_slider.valueChanged.connect(self.update_earth_opacity)
+    #         opacity_layout.addWidget(self.earth_opacity_slider)
+            
+    #         # Add value label
+    #         self.earth_opacity_label = QLabel("80%")
+    #         self.earth_opacity_label.setMinimumWidth(40)
+    #         opacity_layout.addWidget(self.earth_opacity_label)
+            
+    #         # Add some space
+    #         opacity_layout.addStretch()
+            
+    #         # Style the control
+    #         opacity_control.setStyleSheet("""
+    #             QWidget {
+    #                 background-color: rgba(50, 50, 50, 200);
+    #                 border: 1px solid #666;
+    #                 border-radius: 5px;
+    #             }
+    #             QLabel {
+    #                 color: white;
+    #                 font-weight: bold;
+    #             }
+    #             QSlider::groove:horizontal {
+    #                 border: 1px solid #999;
+    #                 height: 8px;
+    #                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #B0B0B0, stop:1 #A0A0A0);
+    #                 margin: 2px 0;
+    #                 border-radius: 4px;
+    #             }
+    #             QSlider::handle:horizontal {
+    #                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #b4b4b4, stop:1 #8f8f8f);
+    #                 border: 1px solid #5c5c5c;
+    #                 width: 18px;
+    #                 margin: -2px 0;
+    #                 border-radius: 3px;
+    #             }
+    #         """)
+            
+    #         # Add to the VTK layout at the bottom
+    #         vtk_layout.addWidget(opacity_control)
+            
+    #         print("Earth opacity control added below visualization")
+            
+    #     except Exception as e:
+    #         print(f"Error adding opacity control: {e}")
+    #         # Fallback: add to main control panel if VTK layout fails
+    #         try:
+    #             self.add_opacity_control_to_sidebar()
+    #         except:
+    #             print("Could not add opacity control anywhere")
+
+    # def add_opacity_control_to_sidebar(self):
+    #     """Fallback: add opacity control to sidebar"""
+    #     # Find analysis parameters group
+    #     for i in range(self.control_layout.count()):
+    #         item = self.control_layout.itemAt(i)
+    #         if item and isinstance(item.widget(), QGroupBox) and item.widget().title() == "Analysis Parameters":
+    #             analysis_group = item.widget()
+    #             analysis_layout = analysis_group.layout()
+                
+    #             # Add Earth opacity control
+    #             self.earth_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+    #             self.earth_opacity_slider.setRange(0, 100)
+    #             self.earth_opacity_slider.setValue(80)
+    #             self.earth_opacity_slider.valueChanged.connect(self.update_earth_opacity)
+                
+    #             self.earth_opacity_label = QLabel("80%")
+    #             self.earth_opacity_label.setMinimumWidth(50)
+                
+    #             analysis_layout.addRow("Earth Opacity:", self.earth_opacity_slider)
+    #             analysis_layout.addRow("", self.earth_opacity_label)
+    #            break
+
+    # def update_earth_opacity(self, value):
+    #     """Update Earth opacity from slider"""
+    #     try:
+    #         opacity = value / 100.0
+    #         self.earth_opacity_label.setText(f"{value}%")
+            
+    #         if hasattr(self, 'earth_actor') and self.earth_actor:
+    #             self.earth_actor.GetProperty().SetOpacity(opacity)
+                
+    #             # Force render
+    #             if hasattr(self, 'vtk_widget'):
+    #                 self.vtk_widget.GetRenderWindow().Render()
+                    
+    #             print(f"Earth opacity updated to {value}%")
+                
+    #     except Exception as e:
+    #         print(f"Error updating Earth opacity: {e}")
+    
+    def cleanup_existing_earth_actors(self):
+        """Clean up all existing Earth-related actors"""
+        actors_to_cleanup = [
+            'earth_actor', 'ocean_actor', 'earth_wireframe_actor', 
+            'equator_actor', 'prime_meridian_actor'
+        ]
+        
+        for actor_name in actors_to_cleanup:
+            if hasattr(self, actor_name):
+                actor = getattr(self, actor_name)
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    setattr(self, actor_name, None)
+        
+        # Clean up actor lists
+        if hasattr(self, 'lat_long_actors') and self.lat_long_actors:
+            for actor in self.lat_long_actors:
+                if actor:
+                    self.renderer.RemoveActor(actor)
+            self.lat_long_actors = []
+
+    def download_earth_texture(self):
+        """Download a free Earth texture (helper function)"""
+        print("""
+To get a high-quality Earth texture, you can download one from:
+
+1. NASA Blue Marble: 
+   https://visibleearth.nasa.gov/images/57752/blue-marble-land-surface-shallow-water-and-shaded-topography
+   
+2. Natural Earth: 
+   https://www.naturalearthdata.com/downloads/10m-raster-data/
+   
+3. Free texture sites:
+   - https://www.solarsystemscope.com/textures/ (Planet textures)
+   - https://planetpixelemporium.com/planets.html (Free planet textures)
+
+Save the image as 'earth_texture.jpg' in the same directory as your script.
+For best results, use an equirectangular projection (2:1 aspect ratio).
+        """)
+
+    def cleanup_existing_earth_actors(self):
+        """Clean up all existing Earth-related actors"""
+        actors_to_cleanup = [
+            'earth_actor', 'ocean_actor', 'earth_wireframe_actor', 
+            'equator_actor'
+        ]
+        
+        for actor_name in actors_to_cleanup:
+            if hasattr(self, actor_name):
+                actor = getattr(self, actor_name)
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    setattr(self, actor_name, None)
+        
+        # Clean up actor lists
+        if hasattr(self, 'lat_long_actors') and self.lat_long_actors:
+            for actor in self.lat_long_actors:
+                if actor:
+                    self.renderer.RemoveActor(actor)
+            self.lat_long_actors = []
+        
     def clear_field_visualization(self):
-        """FIXED clearing that preserves Earth"""
+        """Clear field visualization while preserving Earth texture and lat/long grid"""
         print("=== CLEARING FIELD VISUALIZATION (PRESERVING EARTH) ===")
         
         actors_removed = 0
         
-        # Remove field actor (used by most modes)
+        # Store Earth-related actors that should be preserved
+        earth_actors_to_preserve = {
+            'earth_actor': getattr(self, 'earth_actor', None),
+            'equator_actor': getattr(self, 'equator_actor', None),
+            'lat_long_actors': getattr(self, 'lat_long_actors', [])
+        }
+        
+        # Flatten the list of actors to preserve for easy checking
+        preserve_list = []
+        if earth_actors_to_preserve['earth_actor']:
+            preserve_list.append(earth_actors_to_preserve['earth_actor'])
+        if earth_actors_to_preserve['equator_actor']:
+            preserve_list.append(earth_actors_to_preserve['equator_actor'])
+        preserve_list.extend(earth_actors_to_preserve['lat_long_actors'])
+        
+        # Remove field visualization actors (but preserve Earth)
         if hasattr(self, 'field_actor') and self.field_actor:
-            self.renderer.RemoveActor(self.field_actor)
-            self.field_actor = None
-            actors_removed += 1
-            print("Removed field_actor")
-            
+            if self.field_actor not in preserve_list:
+                self.renderer.RemoveActor(self.field_actor)
+                self.field_actor = None
+                actors_removed += 1
+                print("Removed field_actor")
+        
         # Remove volume actor
         if hasattr(self, 'volume_actor') and self.volume_actor:
             self.renderer.RemoveVolume(self.volume_actor)
             self.volume_actor = None
             actors_removed += 1
             print("Removed volume_actor")
-            
-        # Remove wireframe actors (for multiple wireframe mode)
-        if hasattr(self, 'wireframe_actors'):
-            for i, actor in enumerate(self.wireframe_actors):
-                if actor:
-                    self.renderer.RemoveActor(actor)
-                    actors_removed += 1
-            self.wireframe_actors = []
-            print(f"Removed wireframe_actors")
-            
-        # Remove slice actors (for multiple slice mode)
-        if hasattr(self, 'slice_actors'):
-            for i, actor in enumerate(self.slice_actors):
-                if actor:
-                    self.renderer.RemoveActor(actor)
-                    actors_removed += 1
-            self.slice_actors = []
-            print(f"Removed slice_actors")
-            
-        # Remove isosurface actors
-        if hasattr(self, 'isosurface_actors'):
-            for i, actor in enumerate(self.isosurface_actors):
-                if actor:
-                    self.renderer.RemoveActor(actor)
-                    actors_removed += 1
-            self.isosurface_actors = []
-            print(f"Removed isosurface_actors")
-            
-        # Remove scalar bar (but preserve Earth!)
+        
+        # Remove other visualization actors while preserving Earth
+        visualization_actor_lists = ['wireframe_actors', 'slice_actors', 'isosurface_actors']
+        
+        for actor_list_name in visualization_actor_lists:
+            if hasattr(self, actor_list_name):
+                actor_list = getattr(self, actor_list_name)
+                for actor in actor_list:
+                    if actor and actor not in preserve_list:
+                        self.renderer.RemoveActor(actor)
+                        actors_removed += 1
+                setattr(self, actor_list_name, [])
+                if actor_list:
+                    print(f"Removed {actor_list_name}")
+        
+        # Remove scalar bar
         if hasattr(self, 'scalar_bar') and self.scalar_bar:
             self.renderer.RemoveViewProp(self.scalar_bar)
             self.scalar_bar = None
             print("Removed scalar_bar")
-            
-        # IMPORTANT: DO NOT remove Earth actor here!
+        
+        # Verify Earth actors are still in renderer (re-add if missing)
+        self.verify_earth_actors_in_renderer(earth_actors_to_preserve)
+        
         print(f"Total field actors removed: {actors_removed} (Earth preserved)")
         print("=== CLEAR COMPLETE ===")
-
-    # Add a manual test method
-    def test_earth_visibility(self):
-        """Test method to check if Earth is visible"""
-        print("=== TESTING EARTH VISIBILITY ===")
+    
+    def verify_earth_actors_in_renderer(self, earth_actors_to_preserve):
+        """Ensure all Earth actors are still in the renderer"""
+        # Get current actors in renderer
+        current_actors = []
+        actors = self.renderer.GetActors()
+        actors.InitTraversal()
+        while True:
+            actor = actors.GetNextActor()
+            if not actor:
+                break
+            current_actors.append(actor)
         
-        if hasattr(self, 'earth_actor') and self.earth_actor:
-            print(f"✅ Earth actor exists: {self.earth_actor}")
-            print(f"   Earth visibility: {self.earth_actor.GetVisibility()}")
-            print(f"   Earth opacity: {self.earth_actor.GetProperty().GetOpacity()}")
-            print(f"   Earth color: {self.earth_actor.GetProperty().GetColor()}")
-            
-            # Check if it's in the renderer
-            actors = self.renderer.GetActors()
-            actors.InitTraversal()
-            earth_in_renderer = False
-            while actors.GetNextActor():
-                if actors.GetLastActor() == self.earth_actor:
-                    earth_in_renderer = True
-                    break
-                    
-            print(f"   Earth in renderer: {earth_in_renderer}")
-            
-            if not earth_in_renderer:
-                print("🔧 Re-adding Earth to renderer...")
-                self.renderer.AddActor(self.earth_actor)
-                self.vtk_widget.GetRenderWindow().Render()
-                
-        else:
-            print("❌ No Earth actor found - creating new one...")
-            self.create_earth_representation()
-            
-        print("=== EARTH VISIBILITY TEST COMPLETE ===")
+        # Check and re-add Earth actor if missing
+        if earth_actors_to_preserve['earth_actor']:
+            if earth_actors_to_preserve['earth_actor'] not in current_actors:
+                self.renderer.AddActor(earth_actors_to_preserve['earth_actor'])
+                print("Re-added Earth texture actor")
+        
+        # Check and re-add equator actor if missing
+        if earth_actors_to_preserve['equator_actor']:
+            if earth_actors_to_preserve['equator_actor'] not in current_actors:
+                self.renderer.AddActor(earth_actors_to_preserve['equator_actor'])
+                print("Re-added equator actor")
+        
+        # Check and re-add lat/long grid actors if missing
+        readded_grid_count = 0
+        for grid_actor in earth_actors_to_preserve['lat_long_actors']:
+            if grid_actor and grid_actor not in current_actors:
+                self.renderer.AddActor(grid_actor)
+                readded_grid_count += 1
+        
+        if readded_grid_count > 0:
+            print(f"Re-added {readded_grid_count} lat/long grid actors")
         
     def setup_visualization_controls(self):
         """Enhanced controls with descriptions UNDER slider rows"""
@@ -2607,22 +3190,22 @@ class ElectronFluxVisualizer(QMainWindow):
         except Exception as e:
             print(f"Error changing colormap: {e}")
         
-    def create_earth_representation(self):
-        """Create a simple Earth sphere for reference"""
-        earth_sphere = vtk.vtkSphereSource()
-        earth_sphere.SetRadius(6371.0)  # Earth radius in km
-        earth_sphere.SetThetaResolution(50)
-        earth_sphere.SetPhiResolution(50)
+    # def create_earth_representation(self):
+    #     """Create a simple Earth sphere for reference"""
+    #     earth_sphere = vtk.vtkSphereSource()
+    #     earth_sphere.SetRadius(6371.0)  # Earth radius in km
+    #     earth_sphere.SetThetaResolution(50)
+    #     earth_sphere.SetPhiResolution(50)
         
-        earth_mapper = vtk.vtkPolyDataMapper()
-        earth_mapper.SetInputConnection(earth_sphere.GetOutputPort())
+    #     earth_mapper = vtk.vtkPolyDataMapper()
+    #     earth_mapper.SetInputConnection(earth_sphere.GetOutputPort())
         
-        self.earth_actor = vtk.vtkActor()
-        self.earth_actor.SetMapper(earth_mapper)
-        self.earth_actor.GetProperty().SetColor(0.3, 0.3, 0.8)  # Blue-ish
-        self.earth_actor.GetProperty().SetOpacity(0.3)
+    #     self.earth_actor = vtk.vtkActor()
+    #     self.earth_actor.SetMapper(earth_mapper)
+    #     self.earth_actor.GetProperty().SetColor(0.3, 0.3, 0.8)  # Blue-ish
+    #     self.earth_actor.GetProperty().SetOpacity(0.3)
         
-        self.renderer.AddActor(self.earth_actor)
+    #     self.renderer.AddActor(self.earth_actor)
         
     def connect_signals(self):
         """Connect UI signals to slots"""
