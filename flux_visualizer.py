@@ -335,7 +335,7 @@ class ElectronFluxVisualizer(QMainWindow):
             traceback.print_exc()
         
     def setup_ui(self):
-        """Setup the user interface"""
+        """Setup the user interface with wider control panel"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -356,7 +356,7 @@ class ElectronFluxVisualizer(QMainWindow):
         
         splitter.addWidget(vtk_frame)
         
-        # Right panel - controls
+        # Right panel - controls (WIDER)
         control_panel = QWidget()
         self.control_layout = QVBoxLayout(control_panel)
         
@@ -458,16 +458,20 @@ class ElectronFluxVisualizer(QMainWindow):
         
         self.control_layout.addStretch()
         
-        control_panel.setMaximumWidth(350)
+        # WIDER control panel (was 350, now 450)
+        control_panel.setMaximumWidth(450)
+        control_panel.setMinimumWidth(450)
         splitter.addWidget(control_panel)
         
-        # Set splitter proportions
-        splitter.setSizes([800, 350])
+        # Set splitter proportions (adjusted for wider panel)
+        splitter.setSizes([750, 450])
         
         self.connect_signals()
         
     def setup_vtk(self):
-        """Setup VTK 3D visualization"""
+        """Setup VTK 3D visualization with enhanced axes and labels"""
+        print("=== SETTING UP VTK RENDERER ===")
+        
         # Renderer
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
@@ -479,11 +483,426 @@ class ElectronFluxVisualizer(QMainWindow):
         camera.SetFocalPoint(0, 0, 0)
         camera.SetViewUp(0, 0, 1)
         
-        # Create Earth representation (optional)
-        self.create_earth_representation()
+        print("Renderer and camera setup complete")
+        
+        # Create Earth representation (with debugging)
+        print("About to call create_earth_representation()...")
+        try:
+            self.create_earth_representation()
+            print("create_earth_representation() completed successfully")
+        except Exception as e:
+            print(f"ERROR in create_earth_representation(): {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Add dynamic coordinate axes
+        print("About to setup coordinate axes...")
+        try:
+            self.setup_coordinate_axes()
+            print("Coordinate axes setup complete")
+        except Exception as e:
+            print(f"ERROR in setup_coordinate_axes(): {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print("=== VTK SETUP COMPLETE ===")
 
+    def setup_coordinate_axes(self):
+        """Setup dynamic coordinate axes with snap-to-axis controls"""
+        # Create axes actor with proper labels and units
+        self.axes_actor = vtk.vtkAxesActor()
+        
+        # Set axis labels with units
+        self.axes_actor.SetXAxisLabelText("X (km)")
+        self.axes_actor.SetYAxisLabelText("Y (km)")
+        self.axes_actor.SetZAxisLabelText("Z (km)")
+        
+        # Style the axes
+        self.axes_actor.SetTotalLength(5000, 5000, 5000)  # 5000 km length
+        self.axes_actor.SetShaftTypeToLine()
+        self.axes_actor.SetAxisLabels(True)
+        
+        # Improve text properties
+        for axis_label in [self.axes_actor.GetXAxisCaptionActor2D(),
+                          self.axes_actor.GetYAxisCaptionActor2D(),
+                          self.axes_actor.GetZAxisCaptionActor2D()]:
+            axis_label.GetTextActor().SetTextScaleModeToNone()
+            axis_label.GetCaptionTextProperty().SetFontSize(12)
+            axis_label.GetCaptionTextProperty().SetColor(1, 1, 1)
+            axis_label.GetCaptionTextProperty().BoldOn()
+        
+        # Create orientation widget to show axes in corner
+        self.orientation_widget = vtk.vtkOrientationMarkerWidget()
+        self.orientation_widget.SetOrientationMarker(self.axes_actor)
+        self.orientation_widget.SetInteractor(self.vtk_widget)
+        self.orientation_widget.SetViewport(0.0, 0.0, 0.3, 0.3)  # Bottom left corner
+        self.orientation_widget.EnabledOn()
+        self.orientation_widget.InteractiveOff()  # Don't allow user to move it
+        
+        # Add snap-to-axis buttons next to the orientation widget
+        self.setup_snap_to_axis_buttons()
+        
+        print("Dynamic coordinate axes with snap buttons added")
+
+    def setup_snap_to_axis_buttons(self):
+        """Add snap-to-axis buttons overlaid on the VTK widget"""
+        # Create a widget to hold the snap buttons
+        self.snap_buttons_widget = QWidget(self.vtk_widget)
+        self.snap_buttons_widget.setGeometry(10, 10, 200, 30)  # Top-left corner
+        
+        # Create horizontal layout for buttons
+        snap_layout = QHBoxLayout(self.snap_buttons_widget)
+        snap_layout.setContentsMargins(2, 2, 2, 2)
+        snap_layout.setSpacing(3)
+        
+        # Create snap buttons with tooltips
+        self.snap_x_button = QPushButton("X")
+        self.snap_x_button.setMaximumSize(25, 25)
+        self.snap_x_button.setToolTip("Snap to X-axis view (X→right, Y→up, Z→out)")
+        self.snap_x_button.clicked.connect(self.snap_to_x_axis)
+        self.snap_x_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(200, 50, 50, 180);
+                color: white;
+                border: 1px solid white;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 70, 70, 200);
+            }
+        """)
+        
+        self.snap_y_button = QPushButton("Y")
+        self.snap_y_button.setMaximumSize(25, 25)
+        self.snap_y_button.setToolTip("Snap to Y-axis view (Y→right, Z→up, X→out)")
+        self.snap_y_button.clicked.connect(self.snap_to_y_axis)
+        self.snap_y_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(50, 200, 50, 180);
+                color: white;
+                border: 1px solid white;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 255, 70, 200);
+            }
+        """)
+        
+        self.snap_z_button = QPushButton("Z")
+        self.snap_z_button.setMaximumSize(25, 25)
+        self.snap_z_button.setToolTip("Snap to Z-axis view (X→right, Z→up, Y→out)")
+        self.snap_z_button.clicked.connect(self.snap_to_z_axis)
+        self.snap_z_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(50, 50, 200, 180);
+                color: white;
+                border: 1px solid white;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 70, 255, 200);
+            }
+        """)
+        
+        # Add ISO button for isometric view
+        self.snap_iso_button = QPushButton("ISO")
+        self.snap_iso_button.setMaximumSize(35, 25)
+        self.snap_iso_button.setToolTip("Snap to isometric 3D view")
+        self.snap_iso_button.clicked.connect(self.snap_to_isometric)
+        self.snap_iso_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(100, 100, 100, 180);
+                color: white;
+                border: 1px solid white;
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 9px;
+            }
+            QPushButton:hover {
+                background-color: rgba(150, 150, 150, 200);
+            }
+        """)
+        
+        # Add buttons to layout
+        snap_layout.addWidget(QLabel("View:"))
+        snap_layout.addWidget(self.snap_x_button)
+        snap_layout.addWidget(self.snap_y_button) 
+        snap_layout.addWidget(self.snap_z_button)
+        snap_layout.addWidget(self.snap_iso_button)
+        snap_layout.addStretch()
+        
+        # Make the widget visible
+        self.snap_buttons_widget.show()
+        self.snap_buttons_widget.raise_()
+
+    def snap_to_x_axis(self):
+        """Snap camera to X-axis aligned view"""
+        print("Snapping to X-axis view...")
+        
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            # Use default center
+            focal_point = [0, 0, 0]
+            distance = 30000
+        else:
+            # Use data center
+            bounds = self.vtk_data.GetBounds()
+            focal_point = [
+                (bounds[1] + bounds[0]) / 2,
+                (bounds[3] + bounds[2]) / 2,
+                (bounds[5] + bounds[4]) / 2
+            ]
+            max_range = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
+            distance = max_range * 1.5
+        
+        camera = self.renderer.GetActiveCamera()
+        camera.SetFocalPoint(focal_point)
+        
+        # X→right, Y→up, Z→out of page
+        # Camera looks from negative Z direction
+        camera.SetPosition(focal_point[0], focal_point[1], focal_point[2] - distance)
+        camera.SetViewUp(0, 1, 0)  # Y axis points up
+        
+        self.renderer.ResetCameraClippingRange()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def snap_to_y_axis(self):
+        """Snap camera to Y-axis aligned view"""
+        print("Snapping to Y-axis view...")
+        
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            focal_point = [0, 0, 0]
+            distance = 30000
+        else:
+            bounds = self.vtk_data.GetBounds()
+            focal_point = [
+                (bounds[1] + bounds[0]) / 2,
+                (bounds[3] + bounds[2]) / 2,
+                (bounds[5] + bounds[4]) / 2
+            ]
+            max_range = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
+            distance = max_range * 1.5
+        
+        camera = self.renderer.GetActiveCamera()
+        camera.SetFocalPoint(focal_point)
+        
+        # Y→right, Z→up, X→out of page
+        # Camera looks from negative X direction
+        camera.SetPosition(focal_point[0] - distance, focal_point[1], focal_point[2])
+        camera.SetViewUp(0, 0, 1)  # Z axis points up
+        
+        self.renderer.ResetCameraClippingRange()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def snap_to_z_axis(self):
+        """Snap camera to Z-axis aligned view"""
+        print("Snapping to Z-axis view...")
+        
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            focal_point = [0, 0, 0]
+            distance = 30000
+        else:
+            bounds = self.vtk_data.GetBounds()
+            focal_point = [
+                (bounds[1] + bounds[0]) / 2,
+                (bounds[3] + bounds[2]) / 2,
+                (bounds[5] + bounds[4]) / 2
+            ]
+            max_range = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
+            distance = max_range * 1.5
+        
+        camera = self.renderer.GetActiveCamera()
+        camera.SetFocalPoint(focal_point)
+        
+        # X→right, Z→up, Y→out of page
+        # Camera looks from negative Y direction
+        camera.SetPosition(focal_point[0], focal_point[1] - distance, focal_point[2])
+        camera.SetViewUp(0, 0, 1)  # Z axis points up
+        
+        self.renderer.ResetCameraClippingRange()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def snap_to_isometric(self):
+        """Snap camera to nice isometric 3D view"""
+        print("Snapping to isometric view...")
+        
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            focal_point = [0, 0, 0]
+            distance = 30000
+        else:
+            bounds = self.vtk_data.GetBounds()
+            focal_point = [
+                (bounds[1] + bounds[0]) / 2,
+                (bounds[3] + bounds[2]) / 2,
+                (bounds[5] + bounds[4]) / 2
+            ]
+            max_range = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
+            distance = max_range * 1.5
+        
+        camera = self.renderer.GetActiveCamera()
+        camera.SetFocalPoint(focal_point)
+        
+        # Nice isometric view: roughly 45° angles
+        camera.SetPosition(
+            focal_point[0] + distance * 0.7,
+            focal_point[1] + distance * 0.7,
+            focal_point[2] + distance * 0.5
+        )
+        camera.SetViewUp(0, 0, 1)  # Z axis points up
+        
+        self.renderer.ResetCameraClippingRange()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def create_earth_representation(self):
+        """Create a simple but visible Earth sphere"""
+        print("🌍 CREATING SIMPLE EARTH REPRESENTATION...")
+        
+        try:
+            # Create Earth sphere
+            print("Creating Earth sphere...")
+            earth_sphere = vtk.vtkSphereSource()
+            earth_sphere.SetRadius(6371.0)  # Earth radius in km
+            earth_sphere.SetThetaResolution(50)
+            earth_sphere.SetPhiResolution(50)
+            earth_sphere.Update()
+            
+            print(f"Sphere created with {earth_sphere.GetOutput().GetNumberOfPoints()} points")
+            
+            # Create mapper
+            earth_mapper = vtk.vtkPolyDataMapper()
+            earth_mapper.SetInputConnection(earth_sphere.GetOutputPort())
+            
+            # Create actor
+            self.earth_actor = vtk.vtkActor()
+            self.earth_actor.SetMapper(earth_mapper)
+            
+            # Set a distinctive color so we can see it
+            print("Setting Earth properties...")
+            self.earth_actor.GetProperty().SetColor(0.3, 0.5, 0.8)  # Blue
+            self.earth_actor.GetProperty().SetOpacity(0.6)
+            self.earth_actor.GetProperty().SetAmbient(0.4)  # Make it more visible
+            
+            # Add to renderer
+            print("Adding Earth to renderer...")
+            self.renderer.AddActor(self.earth_actor)
+            
+            # Verify it was added
+            actors = self.renderer.GetActors()
+            actors.InitTraversal()
+            earth_found = False
+            total_actors = 0
+            while actors.GetNextActor():
+                actor = actors.GetLastActor()
+                total_actors += 1
+                if actor == self.earth_actor:
+                    earth_found = True
+                    
+            print(f"✅ Earth added! Renderer now has {total_actors} actors, Earth found: {earth_found}")
+            
+            # Force immediate render
+            self.vtk_widget.GetRenderWindow().Render()
+            
+            print("✅ EARTH CREATION COMPLETE!")
+            
+        except Exception as e:
+            print(f"❌ ERROR creating Earth: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def clear_field_visualization(self):
+        """FIXED clearing that preserves Earth"""
+        print("=== CLEARING FIELD VISUALIZATION (PRESERVING EARTH) ===")
+        
+        actors_removed = 0
+        
+        # Remove field actor (used by most modes)
+        if hasattr(self, 'field_actor') and self.field_actor:
+            self.renderer.RemoveActor(self.field_actor)
+            self.field_actor = None
+            actors_removed += 1
+            print("Removed field_actor")
+            
+        # Remove volume actor
+        if hasattr(self, 'volume_actor') and self.volume_actor:
+            self.renderer.RemoveVolume(self.volume_actor)
+            self.volume_actor = None
+            actors_removed += 1
+            print("Removed volume_actor")
+            
+        # Remove wireframe actors (for multiple wireframe mode)
+        if hasattr(self, 'wireframe_actors'):
+            for i, actor in enumerate(self.wireframe_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.wireframe_actors = []
+            print(f"Removed wireframe_actors")
+            
+        # Remove slice actors (for multiple slice mode)
+        if hasattr(self, 'slice_actors'):
+            for i, actor in enumerate(self.slice_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.slice_actors = []
+            print(f"Removed slice_actors")
+            
+        # Remove isosurface actors
+        if hasattr(self, 'isosurface_actors'):
+            for i, actor in enumerate(self.isosurface_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.isosurface_actors = []
+            print(f"Removed isosurface_actors")
+            
+        # Remove scalar bar (but preserve Earth!)
+        if hasattr(self, 'scalar_bar') and self.scalar_bar:
+            self.renderer.RemoveViewProp(self.scalar_bar)
+            self.scalar_bar = None
+            print("Removed scalar_bar")
+            
+        # IMPORTANT: DO NOT remove Earth actor here!
+        print(f"Total field actors removed: {actors_removed} (Earth preserved)")
+        print("=== CLEAR COMPLETE ===")
+
+    # Add a manual test method
+    def test_earth_visibility(self):
+        """Test method to check if Earth is visible"""
+        print("=== TESTING EARTH VISIBILITY ===")
+        
+        if hasattr(self, 'earth_actor') and self.earth_actor:
+            print(f"✅ Earth actor exists: {self.earth_actor}")
+            print(f"   Earth visibility: {self.earth_actor.GetVisibility()}")
+            print(f"   Earth opacity: {self.earth_actor.GetProperty().GetOpacity()}")
+            print(f"   Earth color: {self.earth_actor.GetProperty().GetColor()}")
+            
+            # Check if it's in the renderer
+            actors = self.renderer.GetActors()
+            actors.InitTraversal()
+            earth_in_renderer = False
+            while actors.GetNextActor():
+                if actors.GetLastActor() == self.earth_actor:
+                    earth_in_renderer = True
+                    break
+                    
+            print(f"   Earth in renderer: {earth_in_renderer}")
+            
+            if not earth_in_renderer:
+                print("🔧 Re-adding Earth to renderer...")
+                self.renderer.AddActor(self.earth_actor)
+                self.vtk_widget.GetRenderWindow().Render()
+                
+        else:
+            print("❌ No Earth actor found - creating new one...")
+            self.create_earth_representation()
+            
+        print("=== EARTH VISIBILITY TEST COMPLETE ===")
+        
     def setup_visualization_controls(self):
-        """Enhanced controls with adjustable point density"""
+        """Enhanced controls with descriptions UNDER slider rows"""
         
         # Find the control layout
         control_layout = None
@@ -517,52 +936,139 @@ class ElectronFluxVisualizer(QMainWindow):
         self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
         mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
         
-        # NEW: Point Density Control
-        density_layout = QHBoxLayout()
+        # Wireframe Style Controls (only visible when Wireframe is selected)
+        self.wireframe_controls = QWidget()
+        wireframe_layout = QVBoxLayout(self.wireframe_controls)  # Changed to VBox for descriptions
+        
+        # Wireframe style selector
+        style_row = QHBoxLayout()
+        style_row.addWidget(QLabel("Wireframe Style:"))
+        self.wireframe_style_combo = QComboBox()
+        self.wireframe_style_combo.addItems([
+            "Single Isosurface",
+            "Multiple Isosurface", 
+            "Boundary Box"
+        ])
+        self.wireframe_style_combo.currentTextChanged.connect(self.change_wireframe_style)
+        style_row.addWidget(self.wireframe_style_combo)
+        wireframe_layout.addLayout(style_row)
+        
+        # Isosurface Level Slider with description UNDER
+        self.isosurface_controls = QWidget()
+        iso_layout = QVBoxLayout(self.isosurface_controls)
+        
+        # Slider row
+        iso_slider_row = QHBoxLayout()
+        iso_slider_row.addWidget(QLabel("Contour Level:"))
+        self.isosurface_level_slider = QSlider(Qt.Orientation.Horizontal)
+        self.isosurface_level_slider.setRange(10, 90)
+        self.isosurface_level_slider.setValue(50)
+        self.isosurface_level_slider.valueChanged.connect(self.update_isosurface_level)
+        self.isosurface_level_label = QLabel("50% of peak")
+        self.isosurface_level_label.setMinimumWidth(120)
+        iso_slider_row.addWidget(self.isosurface_level_slider)
+        iso_slider_row.addWidget(self.isosurface_level_label)
+        iso_layout.addLayout(iso_slider_row)
+        
+        # Description UNDER the slider
+        iso_desc = QLabel("Flux intensity level to show as wireframe contour")
+        iso_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 10px;")
+        iso_layout.addWidget(iso_desc)
+        
+        wireframe_layout.addWidget(self.isosurface_controls)
+        
+        # Initially hide wireframe controls
+        self.wireframe_controls.setVisible(False)
+        mode_layout.addRow(self.wireframe_controls)
+        
+        # Slice Plane Controls with description UNDER
+        self.slice_controls = QWidget()
+        slice_layout = QVBoxLayout(self.slice_controls)
+        
+        # Slice axis selector
+        axis_row = QHBoxLayout()
+        axis_row.addWidget(QLabel("Slice Orientation:"))
+        self.slice_axis_combo = QComboBox()
+        self.slice_axis_combo.addItems([
+            "X-Axis (YZ Plane)", 
+            "Y-Axis (XZ Plane)", 
+            "Z-Axis (XY Plane)"
+        ])
+        self.slice_axis_combo.setCurrentText("Z-Axis (XY Plane)")
+        self.slice_axis_combo.currentTextChanged.connect(self.change_slice_axis)
+        axis_row.addWidget(self.slice_axis_combo)
+        slice_layout.addLayout(axis_row)
+        
+        # Slice Position Slider with description UNDER
+        slice_pos_row = QHBoxLayout()
+        slice_pos_row.addWidget(QLabel("Position:"))
+        self.slice_position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.slice_position_slider.setRange(0, 100)
+        self.slice_position_slider.setValue(50)
+        self.slice_position_slider.valueChanged.connect(self.update_slice_position)
+        self.slice_position_label = QLabel("Center (0 km)")
+        self.slice_position_label.setMinimumWidth(120)
+        slice_pos_row.addWidget(self.slice_position_slider)
+        slice_pos_row.addWidget(self.slice_position_label)
+        slice_layout.addLayout(slice_pos_row)
+        
+        # Description UNDER the slider
+        slice_desc = QLabel("Position of cutting plane through the 3D volume")
+        slice_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 10px;")
+        slice_layout.addWidget(slice_desc)
+        
+        # Initially hide slice controls
+        self.slice_controls.setVisible(False)
+        mode_layout.addRow(self.slice_controls)
+        
+        # Point Density Control with description UNDER
+        density_row = QHBoxLayout()
+        density_row.addWidget(QLabel("Point Density:"))
         self.point_density_slider = QSlider(Qt.Orientation.Horizontal)
-        self.point_density_slider.setRange(500, 10000)  # 500 to 10,000 points
-        self.point_density_slider.setValue(5000)  # Default 5,000 points
-        self.point_density_slider.setTickInterval(500)
+        self.point_density_slider.setRange(500, 10000)
+        self.point_density_slider.setValue(5000)
         self.point_density_slider.valueChanged.connect(self.update_point_density)
-        self.point_density_label = QLabel("5000")
-        self.point_density_label.setMinimumWidth(50)
-        density_layout.addWidget(self.point_density_slider)
-        density_layout.addWidget(self.point_density_label)
-        mode_layout.addRow("Point Density:", density_layout)
+        self.point_density_label = QLabel("5,000 points")
+        self.point_density_label.setMinimumWidth(100)
+        density_row.addWidget(self.point_density_slider)
+        density_row.addWidget(self.point_density_label)
+        mode_layout.addRow(density_row)
         
-        # Performance warning
-        perf_warning = QLabel("Higher density = better detail but slower updates")
-        perf_warning.setStyleSheet("color: #888; font-size: 10px;")
-        mode_layout.addRow("", perf_warning)
+        # Description UNDER
+        density_desc = QLabel("Number of flux sample points to display")
+        density_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 85px;")
+        mode_layout.addRow("", density_desc)
         
-        # Opacity control
-        opacity_layout = QHBoxLayout()
+        # Transparency control with description UNDER
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(QLabel("Transparency:"))
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(0, 100)
         self.opacity_slider.setValue(70)
         self.opacity_slider.valueChanged.connect(self.update_opacity)
         self.opacity_label = QLabel("70%")
-        self.opacity_label.setMinimumWidth(40)
-        opacity_layout.addWidget(self.opacity_slider)
-        opacity_layout.addWidget(self.opacity_label)
-        mode_layout.addRow("Opacity:", opacity_layout)
+        self.opacity_label.setMinimumWidth(50)
+        opacity_row.addWidget(self.opacity_slider)
+        opacity_row.addWidget(self.opacity_label)
+        mode_layout.addRow(opacity_row)
         
-        # Point Size control
-        point_size_layout = QHBoxLayout()
+        # Point Size control with description UNDER
+        point_size_row = QHBoxLayout()
+        point_size_row.addWidget(QLabel("Point Size:"))
         self.point_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.point_size_slider.setRange(100, 800)
         self.point_size_slider.setValue(400)
         self.point_size_slider.valueChanged.connect(self.update_point_size)
-        self.point_size_label = QLabel("400m")
-        self.point_size_label.setMinimumWidth(50)
-        point_size_layout.addWidget(self.point_size_slider)
-        point_size_layout.addWidget(self.point_size_label)
-        mode_layout.addRow("Point Size:", point_size_layout)
+        self.point_size_label = QLabel("400m radius")
+        self.point_size_label.setMinimumWidth(100)
+        point_size_row.addWidget(self.point_size_slider)
+        point_size_row.addWidget(self.point_size_label)
+        mode_layout.addRow(point_size_row)
         
-        # Performance tip for point size
-        size_tip = QLabel("Tip: Fewer points = faster updates")
-        size_tip.setStyleSheet("color: #888; font-size: 10px;")
-        mode_layout.addRow("", size_tip)
+        # Description UNDER
+        size_desc = QLabel("Radius of each flux visualization point")
+        size_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 85px;")
+        mode_layout.addRow("", size_desc)
         
         # Color map selection
         self.colormap_combo = QComboBox()
@@ -579,9 +1085,6 @@ class ElectronFluxVisualizer(QMainWindow):
         
         viz_layout.addLayout(mode_layout)
         
-        # Rest of your existing controls (threshold, isosurface, etc.)
-        # ... keep your existing threshold and isosurface controls here ...
-        
         # Insert into main control layout
         if insert_index >= 0:
             control_layout.insertWidget(insert_index, viz_group)
@@ -589,24 +1092,225 @@ class ElectronFluxVisualizer(QMainWindow):
             control_layout.addWidget(viz_group)
 
     def update_point_density(self, density):
-        """Update the number of points displayed"""
-        self.point_density_label.setText(str(density))
+        """COMPACT: Update point density with simple labeling"""
+        self.point_density_label.setText(f"{density:,} points")
         
         # Only regenerate if we're in point cloud mode
         if (hasattr(self, 'viz_mode_combo') and 
             self.viz_mode_combo.currentText() == "Point Cloud" and
             hasattr(self, 'vtk_data') and self.vtk_data):
             
-            print(f"Updating point density to {density} points...")
-            
-            # Use a timer to debounce for performance
             if hasattr(self, '_density_update_timer'):
                 self._density_update_timer.stop()
                 
             self._density_update_timer = QTimer()
             self._density_update_timer.setSingleShot(True)
             self._density_update_timer.timeout.connect(lambda: self._regenerate_point_cloud(density))
-            self._density_update_timer.start(200)  # 200ms delay
+            self._density_update_timer.start(200)
+
+    def change_wireframe_style(self, style_name):
+        """FIXED: Clear previous wireframe when style changes"""
+        print(f"Changing wireframe style to: {style_name}")
+        
+        # Show/hide isosurface controls
+        show_iso_controls = (style_name == "Single Isosurface")
+        if hasattr(self, 'isosurface_controls'):
+            self.isosurface_controls.setVisible(show_iso_controls)
+        
+        if self.viz_mode_combo.currentText() == "Wireframe" and self.vtk_data:
+            # IMPORTANT: Clear previous wireframe first
+            self.clear_field_visualization()
+            
+            # Create new wireframe with new style
+            self.setup_wireframe_rendering()
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def update_isosurface_level(self, level_percent):
+        """COMPACT: Update isosurface level with concise labeling"""
+        # Shorter, more concise label
+        if hasattr(self, 'vtk_data') and self.vtk_data:
+            scalar_range = self.vtk_data.GetScalarRange()
+            actual_value = scalar_range[1] * (level_percent / 100.0)
+            self.isosurface_level_label.setText(f"{level_percent}% ({actual_value:.1e})")
+        else:
+            self.isosurface_level_label.setText(f"{level_percent}% of peak")
+        
+        # Only update if we're in the right mode
+        if not (self.viz_mode_combo.currentText() == "Wireframe" and 
+                self.wireframe_style_combo.currentText() == "Single Isosurface" and
+                self.vtk_data):
+            return
+        
+        # FAST UPDATE: Direct contour level change
+        if hasattr(self, 'field_actor') and self.field_actor:
+            try:
+                mapper = self.field_actor.GetMapper()
+                if mapper:
+                    input_conn = mapper.GetInputConnection(0, 0)
+                    if input_conn:
+                        edges_filter = input_conn.GetProducer()
+                        contour_conn = edges_filter.GetInputConnection(0, 0)
+                        if contour_conn:
+                            contour_filter = contour_conn.GetProducer()
+                            
+                            scalar_range = self.vtk_data.GetScalarRange()
+                            new_level = scalar_range[1] * (level_percent / 100.0)
+                            
+                            contour_filter.SetValue(0, new_level)
+                            contour_filter.Modified()
+                            
+                            self.vtk_widget.GetRenderWindow().Render()
+                            return
+            except:
+                pass
+        
+        self._schedule_isosurface_update()
+
+    def _schedule_isosurface_update(self):
+        """Schedule isosurface update with longer debounce to avoid spam"""
+        if hasattr(self, '_iso_update_timer'):
+            self._iso_update_timer.stop()
+            
+        self._iso_update_timer = QTimer()
+        self._iso_update_timer.setSingleShot(True)
+        self._iso_update_timer.timeout.connect(self._rebuild_isosurface)
+        self._iso_update_timer.start(300)  # 300ms delay (longer to avoid spam)
+
+    def _rebuild_isosurface(self):
+        """Full rebuild of isosurface (slow method)"""
+        print("Rebuilding isosurface (slow method)")
+        self.clear_field_visualization()
+        self.setup_wireframe_rendering()
+        self.vtk_widget.GetRenderWindow().Render()
+            
+    def _update_isosurface(self):
+        """Actually update the isosurface"""
+        self.clear_field_visualization()
+        self.setup_wireframe_rendering()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def change_slice_axis(self, axis_text):
+        """FIXED: Clear previous slice when axis changes"""
+        print(f"Changing slice axis to: {axis_text}")
+        
+        if self.viz_mode_combo.currentText() == "Slice Planes" and self.vtk_data:
+            # IMPORTANT: Clear previous slice first
+            self.clear_field_visualization()
+            
+            # Create new slice with new axis
+            self.setup_slice_planes()
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def update_slice_position(self, position_percent):
+        """COMPACT: Update slice position with concise coordinate info"""
+        # More compact labeling
+        if hasattr(self, 'vtk_data') and self.vtk_data:
+            bounds = self.vtk_data.GetBounds()
+            axis_text = self.slice_axis_combo.currentText()
+            
+            if "X-Axis" in axis_text:
+                coord_range = bounds[1] - bounds[0]
+                coord_pos = bounds[0] + (position_percent/100.0) * coord_range
+                axis_name = "X"
+            elif "Y-Axis" in axis_text:
+                coord_range = bounds[3] - bounds[2]
+                coord_pos = bounds[2] + (position_percent/100.0) * coord_range
+                axis_name = "Y"
+            else:  # Z-Axis
+                coord_range = bounds[5] - bounds[4]
+                coord_pos = bounds[4] + (position_percent/100.0) * coord_range
+                axis_name = "Z"
+            
+            # Compact label format
+            if position_percent <= 25:
+                position_name = "Near"
+            elif position_percent >= 75:
+                position_name = "Far"
+            else:
+                position_name = "Center"
+                
+            self.slice_position_label.setText(f"{position_name} ({axis_name}={coord_pos:.0f}km)")
+        else:
+            if position_percent <= 25:
+                label = "Near"
+            elif position_percent >= 75:
+                label = "Far" 
+            else:
+                label = "Center"
+            self.slice_position_label.setText(f"{label} ({position_percent}%)")
+        
+        # Only update if we're in slice mode
+        if not (self.viz_mode_combo.currentText() == "Slice Planes" and self.vtk_data):
+            return
+        
+        # FAST UPDATE: Direct plane origin change
+        if hasattr(self, 'field_actor') and self.field_actor:
+            try:
+                mapper = self.field_actor.GetMapper()
+                if mapper:
+                    input_conn = mapper.GetInputConnection(0, 0)
+                    if input_conn:
+                        cutter = input_conn.GetProducer()
+                        if hasattr(cutter, 'GetCutFunction'):
+                            plane = cutter.GetCutFunction()
+                            
+                            bounds = self.vtk_data.GetBounds()
+                            axis_text = self.slice_axis_combo.currentText()
+                            
+                            if "X-Axis" in axis_text:
+                                origin_coord = bounds[0] + (position_percent/100.0) * (bounds[1] - bounds[0])
+                                new_origin = [origin_coord, (bounds[2]+bounds[3])/2, (bounds[4]+bounds[5])/2]
+                            elif "Y-Axis" in axis_text:
+                                origin_coord = bounds[2] + (position_percent/100.0) * (bounds[3] - bounds[2])
+                                new_origin = [(bounds[0]+bounds[1])/2, origin_coord, (bounds[4]+bounds[5])/2]
+                            else:  # Z-Axis
+                                origin_coord = bounds[4] + (position_percent/100.0) * (bounds[5] - bounds[4])
+                                new_origin = [(bounds[0]+bounds[1])/2, (bounds[2]+bounds[3])/2, origin_coord]
+                            
+                            plane.SetOrigin(new_origin)
+                            plane.Modified()
+                            cutter.Modified()
+                            
+                            self.vtk_widget.GetRenderWindow().Render()
+                            return
+            except:
+                pass
+        
+        self._schedule_slice_update()
+
+    def _schedule_slice_update(self):
+        """Schedule slice update with debounce"""
+        if hasattr(self, '_slice_update_timer'):
+            self._slice_update_timer.stop()
+            
+        self._slice_update_timer = QTimer()
+        self._slice_update_timer.setSingleShot(True)
+        self._slice_update_timer.timeout.connect(self._rebuild_slice)
+        self._slice_update_timer.start(200)  # 200ms delay
+
+    def _rebuild_slice(self):
+        """Full rebuild of slice (slow method)"""
+        print("Rebuilding slice (slow method)")
+        self.clear_field_visualization()
+        self.setup_slice_planes()
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def _update_slice(self):
+        """Actually update the slice"""
+        self.clear_field_visualization()
+        self.setup_slice_planes()
+        self.vtk_widget.GetRenderWindow().Render()
+            
+    def update_point_size(self, value):
+        """COMPACT: Update point size with simple labeling"""
+        radius_m = value
+        self.point_size_label.setText(f"{radius_m}m radius")
+        
+        # Only update if we're in point cloud mode and have a field actor
+        if (self.viz_mode_combo.currentText() == "Point Cloud" and 
+            hasattr(self, 'field_actor') and self.field_actor):
+            
+            self.update_point_cloud_size(radius_m)
 
     def _regenerate_point_cloud(self, density):
         """Regenerate point cloud with new density"""
@@ -808,18 +1512,20 @@ class ElectronFluxVisualizer(QMainWindow):
             self.update_threshold()
             
     def change_visualization_mode(self, mode):
-        """Change the field visualization mode - FIXED WITH DEBUGGING"""
+        """Enhanced mode change with control visibility"""
+        # Show/hide relevant controls based on mode
+        self.wireframe_controls.setVisible(mode == "Wireframe")
+        self.slice_controls.setVisible(mode == "Slice Planes")
+        
+        # Call the original visualization change
         if not self.vtk_data:
-            print("No VTK data loaded")
             return
-            
+        
         print(f"=== CHANGING VISUALIZATION MODE TO: {mode} ===")
         
         try:
-            # Clear existing visualization
             self.clear_field_visualization()
-                
-            # Apply new visualization mode
+            
             if mode == "Volume Rendering":
                 self.setup_volume_rendering()
             elif mode == "Isosurfaces":
@@ -833,30 +1539,23 @@ class ElectronFluxVisualizer(QMainWindow):
             elif mode == "Slice Planes":
                 self.setup_slice_planes()
             else:
-                # Fallback to original visualization
-                print("Using fallback field visualization")
                 self.setup_field_visualization()
                 
-            # Force render
             self.vtk_widget.GetRenderWindow().Render()
             print(f"=== VISUALIZATION MODE CHANGED TO: {mode} ===")
-            
+        
         except Exception as e:
             print(f"Error changing visualization mode: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback to basic field visualization
-            print("Falling back to basic field visualization")
             self.setup_field_visualization()
             self.vtk_widget.GetRenderWindow().Render()
 
     def clear_field_visualization(self):
-        """Safely remove all field visualization actors - ENHANCED DEBUG"""
-        print("=== CLEARING FIELD VISUALIZATION ===")
+        """ENHANCED clearing to handle ALL visualization actors properly"""
+        print("=== CLEARING ALL FIELD VISUALIZATION ===")
         
         actors_removed = 0
         
-        # Remove field actor
+        # Remove field actor (used by most modes)
         if hasattr(self, 'field_actor') and self.field_actor:
             self.renderer.RemoveActor(self.field_actor)
             self.field_actor = None
@@ -870,14 +1569,23 @@ class ElectronFluxVisualizer(QMainWindow):
             actors_removed += 1
             print("Removed volume_actor")
             
-        # Remove slice actors
+        # Remove wireframe actors (for multiple wireframe mode)
+        if hasattr(self, 'wireframe_actors'):
+            for i, actor in enumerate(self.wireframe_actors):
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    actors_removed += 1
+            self.wireframe_actors = []
+            print(f"Removed wireframe_actors")
+            
+        # Remove slice actors (for multiple slice mode)
         if hasattr(self, 'slice_actors'):
             for i, actor in enumerate(self.slice_actors):
                 if actor:
                     self.renderer.RemoveActor(actor)
                     actors_removed += 1
             self.slice_actors = []
-            print(f"Removed {len(self.slice_actors)} slice_actors")
+            print(f"Removed slice_actors")
             
         # Remove isosurface actors
         if hasattr(self, 'isosurface_actors'):
@@ -888,15 +1596,13 @@ class ElectronFluxVisualizer(QMainWindow):
             self.isosurface_actors = []
             print(f"Removed isosurface_actors")
             
+        # IMPORTANT: Remove scalar bar (it persists across modes)
+        if hasattr(self, 'scalar_bar') and self.scalar_bar:
+            self.renderer.RemoveViewProp(self.scalar_bar)
+            self.scalar_bar = None
+            print("Removed scalar_bar")
+            
         print(f"Total actors removed: {actors_removed}")
-        
-        # Check remaining actors
-        actors = self.renderer.GetActors()
-        actors.InitTraversal()
-        remaining_count = 0
-        while actors.GetNextActor():
-            remaining_count += 1
-        print(f"Remaining actors in renderer: {remaining_count}")
         print("=== CLEAR COMPLETE ===")
 
     def setup_volume_rendering(self):
@@ -1310,14 +2016,193 @@ class ElectronFluxVisualizer(QMainWindow):
             print(f"Simple point rendering failed: {e}")
 
     def setup_wireframe_rendering(self):
-        """Fixed wireframe rendering"""
+        """Enhanced wireframe with user-controllable options"""
         if not self.vtk_data:
             return
-            
-        print("Setting up wireframe rendering...")
+        
+        print("Setting up enhanced wireframe rendering...")
         
         try:
-            # For unstructured grids, extract edges
+            scalar_array = self.vtk_data.GetPointData().GetScalars()
+            if not scalar_array:
+                print("No scalar data for wireframe")
+                return
+            
+            scalar_range = scalar_array.GetRange()
+        
+            # Get current wireframe style
+            style = getattr(self, 'wireframe_style_combo', None)
+            if style:
+                current_style = style.currentText()
+            else:
+                current_style = "Single Isosurface"
+                
+            if current_style == "Single Isosurface":
+                self.create_controllable_single_isosurface(scalar_range)
+            elif current_style == "Multiple Isosurface":
+                self.create_multiple_isosurface_wireframes(scalar_range)
+            else:  # Boundary Box
+                self.create_boundary_wireframe()
+            
+            print("Enhanced wireframe rendering complete")
+        
+        except Exception as e:
+            print(f"Wireframe rendering failed: {e}")
+
+    def create_controllable_single_isosurface(self, scalar_range):
+        """Create isosurface with stored references for fast updates"""
+        if scalar_range[1] <= scalar_range[0]:
+            return
+            
+        level_percent = getattr(self, 'isosurface_level_slider', None)
+        if level_percent:
+            percent = level_percent.value() / 100.0
+        else:
+            percent = 0.5
+            
+        contour_level = scalar_range[1] * percent
+        print(f"Creating isosurface wireframe at {percent*100:.0f}% ({contour_level:.2e})")
+        
+        # Create contour filter
+        self.current_contour_filter = vtk.vtkContourFilter()  # Store reference for fast updates
+        self.current_contour_filter.SetInputData(self.vtk_data)
+        self.current_contour_filter.SetValue(0, contour_level)
+        self.current_contour_filter.Update()
+        
+        contour_output = self.current_contour_filter.GetOutput()
+        
+        if contour_output.GetNumberOfPoints() > 0:
+            # Create edges filter
+            self.current_edges_filter = vtk.vtkExtractEdges()  # Store reference
+            self.current_edges_filter.SetInputConnection(self.current_contour_filter.GetOutputPort())
+            self.current_edges_filter.Update()
+            
+            wireframe_mapper = vtk.vtkPolyDataMapper()
+            wireframe_mapper.SetInputConnection(self.current_edges_filter.GetOutputPort())
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(wireframe_mapper)
+            self.field_actor.GetProperty().SetColor(0.9, 0.9, 0.2)
+            self.field_actor.GetProperty().SetLineWidth(2.0)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print(f"Isosurface wireframe created: {contour_output.GetNumberOfPoints()} points")
+        else:
+            print("No contour generated at this level")
+
+    def create_isosurface_wireframes(self, scalar_range):
+        """Create wireframe contours at different flux levels"""
+        if scalar_range[1] <= scalar_range[0]:
+            return
+        
+        print("Creating isosurface wireframes...")
+    
+        # Create 3-4 isosurface levels in the meaningful range
+        min_val = scalar_range[1] * 0.2   # 20% of max
+        max_val = scalar_range[1] * 0.8   # 80% of max
+    
+        if max_val > min_val:
+            num_levels = 4
+            levels = np.linspace(min_val, max_val, num_levels)
+        
+            for i, level in enumerate(levels):
+                # Create contour
+                contour = vtk.vtkContourFilter()
+                contour.SetInputData(self.vtk_data)
+                contour.SetValue(0, level)
+                contour.Update()
+            
+                contour_output = contour.GetOutput()
+            
+                if contour_output.GetNumberOfPoints() > 0:
+                    # Extract edges to create wireframe
+                    edges = vtk.vtkExtractEdges()
+                    edges.SetInputData(contour_output)
+                    edges.Update()
+                
+                    # Create mapper
+                    wireframe_mapper = vtk.vtkPolyDataMapper()
+                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
+                
+                    # Create actor
+                    wireframe_actor = vtk.vtkActor()
+                    wireframe_actor.SetMapper(wireframe_mapper)
+                
+                    # Color by level (blue to red)
+                    intensity = i / (num_levels - 1)
+                    color = [intensity, 0.5, 1.0 - intensity]
+                    wireframe_actor.GetProperty().SetColor(color)
+                    wireframe_actor.GetProperty().SetLineWidth(2.0)
+                    wireframe_actor.GetProperty().SetOpacity(0.8)
+                
+                    self.wireframe_actors.append(wireframe_actor)
+                    self.renderer.AddActor(wireframe_actor)
+                
+                    print(f"  Level {i+1}: {level:.2e} ({contour_output.GetNumberOfPoints()} points)")
+
+    def create_slice_wireframes(self):
+        """Create wireframe on cross-sectional planes"""
+        if not self.vtk_data:
+            return
+        
+        print("Adding slice wireframes...")
+    
+        try:
+            # Get bounds for slice positioning
+            bounds = self.vtk_data.GetBounds()
+            center = [(bounds[1]+bounds[0])/2, (bounds[3]+bounds[2])/2, (bounds[5]+bounds[4])/2]
+        
+            # Create one slice plane through the center
+            plane = vtk.vtkPlane()
+            plane.SetOrigin(center)
+            plane.SetNormal(0, 0, 1)  # XY plane
+        
+            # Cut the data
+            cutter = vtk.vtkCutter()
+            cutter.SetInputData(self.vtk_data)
+            cutter.SetCutFunction(plane)
+            cutter.Update()
+        
+            slice_data = cutter.GetOutput()
+        
+            if slice_data.GetNumberOfPoints() > 0:
+                # Extract edges
+                edges = vtk.vtkExtractEdges()
+                edges.SetInputData(slice_data)
+                edges.Update()
+            
+                # Create mapper
+                slice_wireframe_mapper = vtk.vtkPolyDataMapper()
+                slice_wireframe_mapper.SetInputConnection(edges.GetOutputPort())
+                
+                # Setup color mapping
+                scalar_range = self.vtk_data.GetScalarRange()
+                slice_wireframe_mapper.SetScalarRange(scalar_range)
+            
+                lut = self.create_lookup_table(self.colormap_combo.currentText())
+                slice_wireframe_mapper.SetLookupTable(lut)
+            
+                # Create actor
+                slice_wireframe_actor = vtk.vtkActor()
+                slice_wireframe_actor.SetMapper(slice_wireframe_mapper)
+                slice_wireframe_actor.GetProperty().SetLineWidth(1.5)
+                slice_wireframe_actor.GetProperty().SetOpacity(0.6)
+            
+                self.wireframe_actors.append(slice_wireframe_actor)
+                self.renderer.AddActor(slice_wireframe_actor)
+            
+                print(f"  Added slice wireframe ({slice_data.GetNumberOfPoints()} points)")
+            
+        except Exception as e:
+            print(f"Error creating slice wireframes: {e}")
+
+    def create_simple_boundary_wireframe(self):
+        """Fallback: create simple boundary wireframe (your original approach)"""
+        print("Creating simple boundary wireframe...")
+    
+        try:
+            # This is your original approach - kept as fallback
             if isinstance(self.vtk_data, vtk.vtkUnstructuredGrid):
                 edges = vtk.vtkExtractEdges()
                 edges.SetInputData(self.vtk_data)
@@ -1333,9 +2218,9 @@ class ElectronFluxVisualizer(QMainWindow):
                 edges.SetInputData(surface.GetOutput())
                 edges.Update()
                 wireframe_data = edges.GetOutput()
-            
-            print(f"Extracted {wireframe_data.GetNumberOfCells()} edges")
-            
+                
+            print(f"Simple wireframe: {wireframe_data.GetNumberOfCells()} edges")
+        
             # Create mapper
             wireframe_mapper = vtk.vtkPolyDataMapper()
             wireframe_mapper.SetInputData(wireframe_data)
@@ -1352,10 +2237,10 @@ class ElectronFluxVisualizer(QMainWindow):
             self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
             
             self.renderer.AddActor(self.field_actor)
-            print("Wireframe rendering setup complete")
-            
+            print("Simple boundary wireframe created")
+        
         except Exception as e:
-            print(f"Wireframe rendering failed: {e}")
+            print(f"Simple boundary wireframe failed: {e}")
 
     def setup_surface_with_edges(self):
         """Fixed surface with edges rendering"""
@@ -1403,62 +2288,77 @@ class ElectronFluxVisualizer(QMainWindow):
             print(f"Surface with edges failed: {e}")
 
     def setup_slice_planes(self):
-        """Fixed slice planes rendering"""
+        """Create slice with stored references for fast updates"""
         if not self.vtk_data:
             return
             
-        print("Setting up slice planes...")
+        print("Setting up enhanced slice planes...")
         
         try:
-            # Get bounds for slice positioning
             bounds = self.vtk_data.GetBounds()
-            center = [(bounds[1]+bounds[0])/2, (bounds[3]+bounds[2])/2, (bounds[5]+bounds[4])/2]
             
-            # Create three orthogonal slice planes
-            planes_config = [
-                {"origin": [center[0], center[1], center[2]], "normal": [1, 0, 0], "name": "YZ"},
-                {"origin": [center[0], center[1], center[2]], "normal": [0, 1, 0], "name": "XZ"},
-                {"origin": [center[0], center[1], center[2]], "normal": [0, 0, 1], "name": "XY"}
-            ]
+            # Get current settings
+            axis_combo = getattr(self, 'slice_axis_combo', None)
+            axis_text = axis_combo.currentText() if axis_combo else "Z-Axis (XY Plane)"
             
-            self.slice_actors = []
+            pos_slider = getattr(self, 'slice_position_slider', None)
+            position_percent = pos_slider.value() / 100.0 if pos_slider else 0.5
             
-            for config in planes_config:
-                # Create plane
-                plane = vtk.vtkPlane()
-                plane.SetOrigin(config["origin"])
-                plane.SetNormal(config["normal"])
+            # Determine axis and position
+            if "X-Axis" in axis_text:
+                normal = [1, 0, 0]
+                origin_coord = bounds[0] + position_percent * (bounds[1] - bounds[0])
+                origin = [origin_coord, (bounds[2]+bounds[3])/2, (bounds[4]+bounds[5])/2]
+                axis_name = "X"
+            elif "Y-Axis" in axis_text:
+                normal = [0, 1, 0]
+                origin_coord = bounds[2] + position_percent * (bounds[3] - bounds[2])
+                origin = [(bounds[0]+bounds[1])/2, origin_coord, (bounds[4]+bounds[5])/2]
+                axis_name = "Y"
+            else:  # Z-Axis
+                normal = [0, 0, 1]
+                origin_coord = bounds[4] + position_percent * (bounds[5] - bounds[4])
+                origin = [(bounds[0]+bounds[1])/2, (bounds[2]+bounds[3])/2, origin_coord]
+                axis_name = "Z"
                 
-                # Create cutter
-                cutter = vtk.vtkCutter()
-                cutter.SetInputData(self.vtk_data)
-                cutter.SetCutFunction(plane)
-                cutter.Update()
-                
-                slice_data = cutter.GetOutput()
-                print(f"Slice {config['name']}: {slice_data.GetNumberOfPoints()} points")
-                
-                if slice_data.GetNumberOfPoints() > 0:
-                    # Create mapper
-                    slice_mapper = vtk.vtkPolyDataMapper()
-                    slice_mapper.SetInputData(slice_data)
-                    
-                    scalar_range = self.vtk_data.GetScalarRange()
-                    slice_mapper.SetScalarRange(scalar_range)
-                    
-                    lut = self.create_lookup_table(self.colormap_combo.currentText())
-                    slice_mapper.SetLookupTable(lut)
-                    
-                    # Create actor
-                    slice_actor = vtk.vtkActor()
-                    slice_actor.SetMapper(slice_mapper)
-                    slice_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-                    
-                    self.slice_actors.append(slice_actor)
-                    self.renderer.AddActor(slice_actor)
-                    
-            print(f"Created {len(self.slice_actors)} slice planes")
+            print(f"Creating {axis_name}-axis slice at {position_percent*100:.0f}% ({origin_coord:.0f} km)")
             
+            # Create cutting plane (store reference for fast updates)
+            self.current_slice_plane = vtk.vtkPlane()
+            self.current_slice_plane.SetOrigin(origin)
+            self.current_slice_plane.SetNormal(normal)
+            
+            # Create cutter (store reference for fast updates)
+            self.current_slice_cutter = vtk.vtkCutter()
+            self.current_slice_cutter.SetInputData(self.vtk_data)
+            self.current_slice_cutter.SetCutFunction(self.current_slice_plane)
+            self.current_slice_cutter.Update()
+            
+            slice_data = self.current_slice_cutter.GetOutput()
+            
+            if slice_data.GetNumberOfPoints() > 0:
+                slice_mapper = vtk.vtkPolyDataMapper()
+                slice_mapper.SetInputConnection(self.current_slice_cutter.GetOutputPort())
+                
+                scalar_range = self.vtk_data.GetScalarRange()
+                slice_mapper.SetScalarRange(scalar_range)
+                
+                lut = self.create_lookup_table(self.colormap_combo.currentText())
+                slice_mapper.SetLookupTable(lut)
+                
+                self.field_actor = vtk.vtkActor()
+                self.field_actor.SetMapper(slice_mapper)
+                self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+                
+                self.renderer.AddActor(self.field_actor)
+                
+                # Setup scalar bar
+                self.setup_scalar_bar(lut, "electron_flux")
+                
+                print(f"Solid slice plane created: {slice_data.GetNumberOfPoints()} points")
+            else:
+                print("No slice data generated")
+                
         except Exception as e:
             print(f"Slice planes failed: {e}")
 
@@ -2041,7 +2941,7 @@ class ElectronFluxVisualizer(QMainWindow):
         print(f"Created default scalar field with {len(scalar_values)} values")
 
     def setup_field_visualization(self):
-        """Setup field visualization - ENHANCED TO STORE DATA"""
+        """Setup field visualization with automatic zoom to fit data"""
         if not self.vtk_data:
             print("ERROR: No VTK data for field visualization")
             return
@@ -2101,16 +3001,84 @@ class ElectronFluxVisualizer(QMainWindow):
                 # Setup scalar bar
                 self.setup_scalar_bar(lut, scalar_array.GetName())
                 
-                # Reset camera
-                self.renderer.ResetCamera()
-                
                 print("Field visualization setup complete")
                 
             except Exception as e:
                 print(f"ERROR in setup_field_visualization: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        # AUTOMATIC ZOOM TO FIT DATA
+        self.zoom_to_fit_data()
 
+    def zoom_to_fit_data(self):
+        """Automatically zoom to encompass the entire VTK field"""
+        if not self.vtk_data:
+            return
+            
+        print("Auto-zooming to fit entire VTK field...")
+        
+        try:
+            # Get data bounds
+            bounds = self.vtk_data.GetBounds()
+            print(f"Data bounds: X({bounds[0]:.0f}, {bounds[1]:.0f}) Y({bounds[2]:.0f}, {bounds[3]:.0f}) Z({bounds[4]:.0f}, {bounds[5]:.0f})")
+            
+            # Calculate the center and size of the data
+            center = [
+                (bounds[1] + bounds[0]) / 2,
+                (bounds[3] + bounds[2]) / 2,
+                (bounds[5] + bounds[4]) / 2
+            ]
+            
+            # Calculate the maximum extent
+            x_range = bounds[1] - bounds[0]
+            y_range = bounds[3] - bounds[2]
+            z_range = bounds[5] - bounds[4]
+            max_range = max(x_range, y_range, z_range)
+            
+            print(f"Data center: ({center[0]:.0f}, {center[1]:.0f}, {center[2]:.0f})")
+            print(f"Max range: {max_range:.0f} km")
+            
+            # Position camera to see entire data with some margin
+            camera = self.renderer.GetActiveCamera()
+            
+            # Set focal point to data center
+            camera.SetFocalPoint(center[0], center[1], center[2])
+            
+            # Position camera at a distance that shows all data with 20% margin
+            distance = max_range * 1.5  # 1.5x for good margin
+            
+            # Position camera at 45-degree angle for good 3D view
+            camera.SetPosition(
+                center[0] + distance * 0.7,  # X offset
+                center[1] + distance * 0.7,  # Y offset  
+                center[2] + distance * 0.5   # Z offset (slightly above)
+            )
+            
+            # Set up vector (Z-axis up)
+            camera.SetViewUp(0, 0, 1)
+            
+            # Reset camera to ensure proper clipping planes
+            self.renderer.ResetCamera()
+            
+            # Fine-tune the zoom to show everything with margin
+            camera.Zoom(0.8)  # Zoom out a bit more for safety margin
+            
+            # Force render
+            self.vtk_widget.GetRenderWindow().Render()
+            
+            print(f"Camera positioned at: {camera.GetPosition()}")
+            print("Auto-zoom complete - entire VTK field should be visible")
+            
+        except Exception as e:
+            print(f"Error in auto-zoom: {e}")
+            # Fallback to default camera position
+            camera = self.renderer.GetActiveCamera()
+            camera.SetPosition(20000, 20000, 10000)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+            self.renderer.ResetCamera()
+        
     def debug_field_actor(self):
         """Specific debug for field actor"""
         print("\n=== FIELD ACTOR DEBUG ===")
@@ -2148,15 +3116,25 @@ class ElectronFluxVisualizer(QMainWindow):
         print("=========================\n")
             
     def setup_scalar_bar(self, lut, scalar_name):
-        """Setup or update scalar bar - FIXED VERSION"""
+        """ENHANCED: Setup scalar bar with proper units"""
         try:
             # Remove existing scalar bar
             if hasattr(self, 'scalar_bar') and self.scalar_bar:
-                self.renderer.RemoveViewProp(self.scalar_bar)  # Use RemoveViewProp instead of deprecated AddActor2D
+                self.renderer.RemoveViewProp(self.scalar_bar)
                 
             self.scalar_bar = vtk.vtkScalarBarActor()
             self.scalar_bar.SetLookupTable(lut)
-            self.scalar_bar.SetTitle(scalar_name or "Field Value")
+            
+            # Enhanced title with units
+            if scalar_name:
+                if "flux" in scalar_name.lower():
+                    title = "Electron Flux\n(particles/cm²/s)"
+                else:
+                    title = f"{scalar_name}\n(data units)"
+            else:
+                title = "Field Value\n(data units)"
+                
+            self.scalar_bar.SetTitle(title)
             self.scalar_bar.SetPosition(0.85, 0.1)
             self.scalar_bar.SetWidth(0.12)
             self.scalar_bar.SetHeight(0.8)
@@ -2165,15 +3143,38 @@ class ElectronFluxVisualizer(QMainWindow):
             self.scalar_bar.SetNumberOfLabels(6)
             self.scalar_bar.GetLabelTextProperty().SetColor(1, 1, 1)
             self.scalar_bar.GetTitleTextProperty().SetColor(1, 1, 1)
-            self.scalar_bar.GetTitleTextProperty().SetFontSize(12)
-            self.scalar_bar.GetLabelTextProperty().SetFontSize(10)
+            self.scalar_bar.GetTitleTextProperty().SetFontSize(11)
+            self.scalar_bar.GetLabelTextProperty().SetFontSize(9)
             
-            # Use AddViewProp instead of deprecated AddActor2D
+            # Format numbers in scientific notation for better readability
+            self.scalar_bar.GetLabelTextProperty().SetJustificationToLeft()
+            
             self.renderer.AddViewProp(self.scalar_bar)
-            print("Scalar bar added successfully")
+            print("Enhanced scalar bar with units added")
             
         except Exception as e:
-            print(f"Error setting up scalar bar: {e}")
+            print(f"Error setting up enhanced scalar bar: {e}")
+
+    def update_status_with_units(self):
+        """ENHANCED: Update status display with proper units"""
+        if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
+            return
+            
+        current_point = self.orbital_path[self.current_time_index]
+        
+        # Calculate additional useful metrics
+        distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
+        altitude_km = distance_from_earth - 6371  # Earth radius
+        
+        # Calculate flux with units
+        flux = self.flux_analyzer.analyze_flux_at_point(current_point)
+        
+        # Enhanced status with better units and formatting
+        self.status_label.setText(
+            f"Time: {current_point.time:.2f} h | Altitude: {altitude_km:.1f} km\n"
+            f"Position: ({current_point.x:.0f}, {current_point.y:.0f}, {current_point.z:.0f}) km\n"
+            f"Flux: {flux:.2e} particles/s through {self.cross_section_spinbox.value():.1f} m² cross-section"
+        )
         
     def load_orbital_data(self):
         """Load orbital CSV data"""
