@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QSlider, QLabel, QDoubleSpinBox, QFileDialog, 
     QMessageBox, QProgressBar, QGroupBox, QFormLayout, QSpinBox,
-    QSplitter, QFrame, QComboBox, QCheckBox
+    QSplitter, QFrame, QComboBox, QCheckBox, QLineEdit
 )
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -243,6 +243,7 @@ class ElectronFluxVisualizer(QMainWindow):
 
         self.setup_visualization_controls()
 
+        self.add_debug_button_to_controls()
 
     def debug_renderer_state(self):
         """Debug method to check renderer state"""
@@ -285,6 +286,54 @@ class ElectronFluxVisualizer(QMainWindow):
         
         print("=========================\n")
 
+    def debug_scalar_ranges(self):
+        """Debug method to check all the ranges and identify NaN source - FIXED"""
+        print("\n=== SCALAR RANGE DEBUG ===")
+        
+        if hasattr(self, 'vtk_data') and self.vtk_data:
+            raw_range = self.vtk_data.GetScalarRange()
+            print(f"Raw VTK data range: {raw_range}")
+        
+        if hasattr(self, 'current_scalar_range'):
+            print(f"Stored current_scalar_range: {self.current_scalar_range}")
+        
+        if hasattr(self, 'field_actor') and self.field_actor:
+            mapper = self.field_actor.GetMapper()
+            if mapper:
+                mapper_range = mapper.GetScalarRange()
+                print(f"Mapper range: {mapper_range}")
+                
+                lut = mapper.GetLookupTable()
+                if lut:
+                    lut_range = lut.GetRange()
+                    print(f"LUT range: {lut_range}")
+                    
+                    # Test some values - FIXED method call
+                    test_val = (lut_range[0] + lut_range[1]) / 2
+                    test_color = [0, 0, 0]  # Output array
+                    lut.GetColor(test_val, test_color)  # Correct VTK call
+                    print(f"Test color at {test_val}: {test_color}")
+        
+        if hasattr(self, 'scalar_bar') and self.scalar_bar:
+            sb_lut = self.scalar_bar.GetLookupTable()
+            if sb_lut:
+                sb_range = sb_lut.GetRange()
+                print(f"Scalar bar LUT range: {sb_range}")
+        
+        cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
+        print(f"Current flux cutoff: {cutoff}")
+        
+        # Check if zero values are causing issues
+        if hasattr(self, 'current_scalar_range'):
+            min_val, max_val = self.current_scalar_range
+            if min_val == 0:
+                print("WARNING: Data starts at 0.0 - this breaks logarithmic scaling!")
+                non_zero_min = max_val * 1e-6  # Suggested minimum
+                print(f"Suggested minimum for log scale: {non_zero_min:.2e}")
+        
+        print("========================\n")
+
+        
     def test_simple_visualization(self):
         """Test method to create a simple visible object"""
         print("=== TESTING SIMPLE VISUALIZATION ===")
@@ -544,6 +593,41 @@ class ElectronFluxVisualizer(QMainWindow):
         
         print("Dynamic coordinate axes with snap buttons added")
 
+    def create_circle(self, radius, height, circle_type):
+        """Create a circle for latitude lines"""
+        try:
+            # Create a circle in the XY plane
+            circle_source = vtk.vtkRegularPolygonSource()
+            circle_source.SetNumberOfSides(60)  # Smooth circle
+            circle_source.SetRadius(radius)
+            circle_source.SetCenter(0, 0, height)
+            circle_source.SetNormal(0, 0, 1)  # XY plane
+            circle_source.Update()
+            
+            # Create mapper
+            circle_mapper = vtk.vtkPolyDataMapper()
+            circle_mapper.SetInputConnection(circle_source.GetOutputPort())
+            
+            # Create actor
+            circle_actor = vtk.vtkActor()
+            circle_actor.SetMapper(circle_mapper)
+            
+            # Set properties based on type
+            if circle_type == 'equator':
+                circle_actor.GetProperty().SetColor(1.0, 0.6, 0.0)  # Orange
+                circle_actor.GetProperty().SetLineWidth(2.5)
+                circle_actor.GetProperty().SetOpacity(0.8)
+            else:  # Regular latitude line
+                circle_actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray
+                circle_actor.GetProperty().SetLineWidth(1.5)
+                circle_actor.GetProperty().SetOpacity(0.6)
+            
+            return circle_actor
+            
+        except Exception as e:
+            print(f"Error creating circle: {e}")
+            return None
+        
     def setup_snap_to_axis_buttons(self):
         """Add snap-to-axis buttons overlaid on the VTK widget"""
         # Create a widget to hold the snap buttons
@@ -1485,7 +1569,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Re-added {readded_grid_count} lat/long grid actors")
         
     def setup_visualization_controls(self):
-        """Enhanced controls with descriptions UNDER slider rows"""
+        """Enhanced controls with 1e-8 default cutoff"""
         
         # Find the control layout
         control_layout = None
@@ -1519,9 +1603,47 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
         mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
         
+        viz_layout.addLayout(mode_layout)
+        
+        # === DYNAMIC CONTROLS FOR SPECIFIC MODES ===
+        
+        # Point Cloud Controls (only visible when Point Cloud is selected)
+        self.point_cloud_controls = QWidget()
+        pc_layout = QFormLayout(self.point_cloud_controls)
+        
+        # Point Density Control
+        density_row = QHBoxLayout()
+        density_row.addWidget(QLabel("Point Density:"))
+        self.point_density_slider = QSlider(Qt.Orientation.Horizontal)
+        self.point_density_slider.setRange(500, 10000)
+        self.point_density_slider.setValue(5000)
+        self.point_density_slider.valueChanged.connect(self.update_point_density)
+        self.point_density_label = QLabel("5,000 points")
+        self.point_density_label.setMinimumWidth(100)
+        density_row.addWidget(self.point_density_slider)
+        density_row.addWidget(self.point_density_label)
+        pc_layout.addRow(density_row)
+        
+        # Point Size Control
+        point_size_row = QHBoxLayout()
+        point_size_row.addWidget(QLabel("Point Size:"))
+        self.point_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.point_size_slider.setRange(100, 800)
+        self.point_size_slider.setValue(400)
+        self.point_size_slider.valueChanged.connect(self.update_point_size)
+        self.point_size_label = QLabel("400m radius")
+        self.point_size_label.setMinimumWidth(100)
+        point_size_row.addWidget(self.point_size_slider)
+        point_size_row.addWidget(self.point_size_label)
+        pc_layout.addRow(point_size_row)
+        
+        # Show point cloud controls initially (since Point Cloud is default)
+        self.point_cloud_controls.setVisible(True)
+        viz_layout.addWidget(self.point_cloud_controls)
+        
         # Wireframe Style Controls (only visible when Wireframe is selected)
         self.wireframe_controls = QWidget()
-        wireframe_layout = QVBoxLayout(self.wireframe_controls)  # Changed to VBox for descriptions
+        wireframe_layout = QFormLayout(self.wireframe_controls)
         
         # Wireframe style selector
         style_row = QHBoxLayout()
@@ -1534,13 +1656,12 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         ])
         self.wireframe_style_combo.currentTextChanged.connect(self.change_wireframe_style)
         style_row.addWidget(self.wireframe_style_combo)
-        wireframe_layout.addLayout(style_row)
+        wireframe_layout.addRow(style_row)
         
-        # Isosurface Level Slider with description UNDER
+        # Isosurface Level Slider
         self.isosurface_controls = QWidget()
-        iso_layout = QVBoxLayout(self.isosurface_controls)
+        iso_layout = QFormLayout(self.isosurface_controls)
         
-        # Slider row
         iso_slider_row = QHBoxLayout()
         iso_slider_row.addWidget(QLabel("Contour Level:"))
         self.isosurface_level_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1551,22 +1672,18 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.isosurface_level_label.setMinimumWidth(120)
         iso_slider_row.addWidget(self.isosurface_level_slider)
         iso_slider_row.addWidget(self.isosurface_level_label)
-        iso_layout.addLayout(iso_slider_row)
+        iso_layout.addRow(iso_slider_row)
         
-        # Description UNDER the slider
-        iso_desc = QLabel("Flux intensity level to show as wireframe contour")
-        iso_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 10px;")
-        iso_layout.addWidget(iso_desc)
-        
-        wireframe_layout.addWidget(self.isosurface_controls)
+        wireframe_layout.addRow(self.isosurface_controls)
+        self.isosurface_controls.setVisible(False)  # Initially hidden
         
         # Initially hide wireframe controls
         self.wireframe_controls.setVisible(False)
-        mode_layout.addRow(self.wireframe_controls)
+        viz_layout.addWidget(self.wireframe_controls)
         
-        # Slice Plane Controls with description UNDER
+        # Slice Plane Controls (only visible when Slice Planes is selected)
         self.slice_controls = QWidget()
-        slice_layout = QVBoxLayout(self.slice_controls)
+        slice_layout = QFormLayout(self.slice_controls)
         
         # Slice axis selector
         axis_row = QHBoxLayout()
@@ -1580,9 +1697,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.slice_axis_combo.setCurrentText("Z-Axis (XY Plane)")
         self.slice_axis_combo.currentTextChanged.connect(self.change_slice_axis)
         axis_row.addWidget(self.slice_axis_combo)
-        slice_layout.addLayout(axis_row)
+        slice_layout.addRow(axis_row)
         
-        # Slice Position Slider with description UNDER
+        # Slice Position Slider
         slice_pos_row = QHBoxLayout()
         slice_pos_row.addWidget(QLabel("Position:"))
         self.slice_position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1593,36 +1710,16 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.slice_position_label.setMinimumWidth(120)
         slice_pos_row.addWidget(self.slice_position_slider)
         slice_pos_row.addWidget(self.slice_position_label)
-        slice_layout.addLayout(slice_pos_row)
-        
-        # Description UNDER the slider
-        slice_desc = QLabel("Position of cutting plane through the 3D volume")
-        slice_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 10px;")
-        slice_layout.addWidget(slice_desc)
+        slice_layout.addRow(slice_pos_row)
         
         # Initially hide slice controls
         self.slice_controls.setVisible(False)
-        mode_layout.addRow(self.slice_controls)
+        viz_layout.addWidget(self.slice_controls)
         
-        # Point Density Control with description UNDER
-        density_row = QHBoxLayout()
-        density_row.addWidget(QLabel("Point Density:"))
-        self.point_density_slider = QSlider(Qt.Orientation.Horizontal)
-        self.point_density_slider.setRange(500, 10000)
-        self.point_density_slider.setValue(5000)
-        self.point_density_slider.valueChanged.connect(self.update_point_density)
-        self.point_density_label = QLabel("5,000 points")
-        self.point_density_label.setMinimumWidth(100)
-        density_row.addWidget(self.point_density_slider)
-        density_row.addWidget(self.point_density_label)
-        mode_layout.addRow(density_row)
+        # === PERMANENT CONTROLS FOR ALL MODES ===
+        permanent_layout = QFormLayout()
         
-        # Description UNDER
-        density_desc = QLabel("Number of flux sample points to display")
-        density_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 85px;")
-        mode_layout.addRow("", density_desc)
-        
-        # Transparency control with description UNDER
+        # Transparency control (permanent)
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(QLabel("Transparency:"))
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1633,27 +1730,43 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.opacity_label.setMinimumWidth(50)
         opacity_row.addWidget(self.opacity_slider)
         opacity_row.addWidget(self.opacity_label)
-        mode_layout.addRow(opacity_row)
+        permanent_layout.addRow(opacity_row)
         
-        # Point Size control with description UNDER
-        point_size_row = QHBoxLayout()
-        point_size_row.addWidget(QLabel("Point Size:"))
-        self.point_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.point_size_slider.setRange(100, 800)
-        self.point_size_slider.setValue(400)
-        self.point_size_slider.valueChanged.connect(self.update_point_size)
-        self.point_size_label = QLabel("400m radius")
-        self.point_size_label.setMinimumWidth(100)
-        point_size_row.addWidget(self.point_size_slider)
-        point_size_row.addWidget(self.point_size_label)
-        mode_layout.addRow(point_size_row)
+        # Min Flux Cutoff (permanent) - DEFAULT TO 1e-8
+        cutoff_row = QHBoxLayout()
+        cutoff_row.addWidget(QLabel("Min Flux Cutoff:"))
         
-        # Description UNDER
-        size_desc = QLabel("Radius of each flux visualization point")
-        size_desc.setStyleSheet("color: #888; font-size: 10px; margin-left: 85px;")
-        mode_layout.addRow("", size_desc)
+        # Create a line edit for scientific notation input
+        self.flux_cutoff_edit = QLineEdit()
+        self.flux_cutoff_edit.setText("1e-8")  # Changed default to 1e-8
+        self.flux_cutoff_edit.setMaximumWidth(100)
+        self.flux_cutoff_edit.editingFinished.connect(self.update_flux_cutoff_from_text)
+        cutoff_row.addWidget(self.flux_cutoff_edit)
         
-        # Color map selection
+        # Add units label separately
+        units_label = QLabel("particles/cm²/s")
+        units_label.setStyleSheet("color: #ccc; font-size: 10px;")
+        cutoff_row.addWidget(units_label)
+        cutoff_row.addStretch()
+        permanent_layout.addRow(cutoff_row)
+        
+        # Store the current flux cutoff value - CHANGED DEFAULT
+        self.current_flux_cutoff = 1e-8
+        
+        # Color Scale toggle (permanent)
+        scale_row = QHBoxLayout()
+        scale_row.addWidget(QLabel("Color Scale:"))
+        self.scale_mode_combo = QComboBox()
+        self.scale_mode_combo.addItems(["Linear", "Logarithmic"])
+        self.scale_mode_combo.setCurrentText("Linear")
+        self.scale_mode_combo.currentTextChanged.connect(self.change_scale_mode)
+        scale_row.addWidget(self.scale_mode_combo)
+        scale_row.addStretch()
+        permanent_layout.addRow(scale_row)
+        
+        # Color map selection (permanent)
+        colormap_row = QHBoxLayout()
+        colormap_row.addWidget(QLabel("Color Map:"))
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems([
             "Blue to Red",
@@ -1664,9 +1777,16 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             "Grayscale"
         ])
         self.colormap_combo.currentTextChanged.connect(self.change_colormap)
-        mode_layout.addRow("Color Map:", self.colormap_combo)
+        colormap_row.addWidget(self.colormap_combo)
+        colormap_row.addStretch()
+        permanent_layout.addRow(colormap_row)
         
-        viz_layout.addLayout(mode_layout)
+        viz_layout.addLayout(permanent_layout)
+        
+        # Add debug button
+        debug_button = QPushButton("Debug Scalar Ranges")
+        debug_button.clicked.connect(self.debug_scalar_ranges)
+        viz_layout.addWidget(debug_button)
         
         # Insert into main control layout
         if insert_index >= 0:
@@ -1674,6 +1794,395 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         else:
             control_layout.addWidget(viz_group)
 
+    def update_flux_cutoff_from_text(self):
+        """Update flux cutoff - with better default"""
+        try:
+            text = self.flux_cutoff_edit.text().strip()
+            
+            # Handle scientific notation
+            if 'e' in text.lower():
+                value = float(text)
+            else:
+                value = float(text)
+            
+            # Clamp to reasonable range
+            value = max(1e-15, min(1e15, value))
+            
+            self.current_flux_cutoff = value
+            print(f"Updated flux cutoff to: {value:.2e} particles/cm²/s")
+            
+            # Update the display to show clean scientific notation
+            if value >= 1e-3 and value < 1e3:
+                self.flux_cutoff_edit.setText(f"{value:.6f}".rstrip('0').rstrip('.'))
+            else:
+                self.flux_cutoff_edit.setText(f"{value:.2e}")
+            
+            # Update visualization immediately
+            if hasattr(self, 'vtk_data') and self.vtk_data:
+                self.update_current_visualization_scale()
+                
+        except ValueError:
+            print(f"Invalid flux cutoff value: {self.flux_cutoff_edit.text()}")
+            # Reset to previous valid value
+            self.flux_cutoff_edit.setText(f"{self.current_flux_cutoff:.2e}")
+
+    def get_effective_scalar_range(self):
+        """Get scalar range with flux cutoff applied"""
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            return (0, 1)
+
+        # Get raw scalar range
+        raw_range = self.vtk_data.GetScalarRange()
+
+        # Apply cutoff to minimum
+        cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
+        effective_min = max(raw_range[0], cutoff)
+        effective_max = raw_range[1]
+
+        # Ensure we have a valid range
+        if effective_min >= effective_max:
+            effective_min = effective_max * 0.001  # Use 0.1% of max as minimum
+
+        return (effective_min, effective_max)
+
+    def change_scale_mode(self, scale_mode):
+        """Change scale mode with debugging"""
+        print(f"\n=== CHANGING SCALE MODE TO: {scale_mode} ===")
+        
+        # Add debugging
+        self.debug_scalar_ranges()
+        
+        # Simply update the scale without regenerating geometry
+        if hasattr(self, 'vtk_data') and self.vtk_data:
+            self.update_current_visualization_scale()
+
+
+    def update_current_visualization_scale(self):
+        """Update the color scale - PROPERLY APPLY CUTOFF"""
+        try:
+            print(f"\n=== UPDATING VISUALIZATION SCALE ===")
+            
+            # Get current mapper
+            mapper = None
+            if hasattr(self, 'field_actor') and self.field_actor:
+                mapper = self.field_actor.GetMapper()
+            elif hasattr(self, 'volume_actor') and self.volume_actor:
+                self.update_volume_transfer_functions()
+                return
+            
+            if not mapper:
+                print("ERROR: No mapper found")
+                return
+            
+            # Get original range
+            if hasattr(self, 'current_scalar_range'):
+                original_range = self.current_scalar_range
+            else:
+                original_range = self.vtk_data.GetScalarRange()
+            
+            print(f"Original range: {original_range}")
+            
+            # Get current settings
+            cutoff = getattr(self, 'current_flux_cutoff', 1e-8)  # Changed default to 1e-8
+            scale_mode = self.scale_mode_combo.currentText()
+            
+            print(f"Flux cutoff: {cutoff:.2e}")
+            print(f"Scale mode: {scale_mode}")
+            
+            # Calculate effective range for color mapping
+            effective_min = max(original_range[0], cutoff)
+            effective_max = original_range[1]
+            
+            # CRITICAL: For log scale, ensure minimum is positive and reasonable
+            if scale_mode == "Logarithmic":
+                if effective_min <= 0:
+                    effective_min = cutoff if cutoff > 0 else 1e-8
+                    print(f"Fixed zero minimum for log scale: {effective_min:.2e}")
+                
+                if effective_max <= effective_min:
+                    effective_max = effective_min * 1000
+                    print(f"Fixed max value for log scale: {effective_max:.2e}")
+            
+            effective_range = (effective_min, effective_max)
+            print(f"Effective range for {scale_mode}: {effective_range}")
+            
+            # Create new lookup table with EFFECTIVE range (not original)
+            lut = self.create_lookup_table_with_scale(
+                self.colormap_combo.currentText(), 
+                scale_mode,
+                effective_range  # Use effective range with cutoff!
+            )
+            
+            # IMPORTANT: Set mapper range to EFFECTIVE range, not original
+            # This ensures data below cutoff gets mapped to the minimum color
+            print(f"Setting mapper range to effective range: {effective_range}")
+            mapper.SetScalarRange(effective_range[0], effective_range[1])
+            mapper.SetLookupTable(lut)
+            
+            # Update scalar bar with effective range
+            if hasattr(self, 'scalar_bar') and self.scalar_bar:
+                scalar_array = self.vtk_data.GetPointData().GetScalars()
+                scalar_name = scalar_array.GetName() if scalar_array else "Field Value"
+                self.setup_scalar_bar(lut, scalar_name)
+            
+            # Force render
+            self.vtk_widget.GetRenderWindow().Render()
+            
+            print(f"=== SCALE UPDATE COMPLETE ===\n")
+            
+        except Exception as e:
+            print(f"ERROR updating scale: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Add a manual debug button to your debug controls section
+    def add_debug_button_to_controls(self):
+        """Add debug button to existing debug controls"""
+        # Find debug group and add the button
+        for i in range(self.control_layout.count()):
+            item = self.control_layout.itemAt(i)
+            if item and isinstance(item.widget(), QGroupBox) and item.widget().title() == "Debug Controls":
+                debug_group = item.widget()
+                debug_layout = debug_group.layout()
+                
+                self.debug_ranges_button = QPushButton("Debug Scalar Ranges")
+                self.debug_ranges_button.clicked.connect(self.debug_scalar_ranges)
+                debug_layout.addWidget(self.debug_ranges_button)
+                break
+            
+    def create_lookup_table_with_scale(self, colormap_name, scale_mode, scalar_range):
+        """Create lookup table - FIXED to handle zero values properly"""
+        lut = vtk.vtkLookupTable()
+        lut.SetNumberOfTableValues(256)
+        
+        try:
+            min_val, max_val = scalar_range
+            
+            print(f"\n=== CREATING {scale_mode} LUT ===")
+            print(f"Input range: {min_val:.2e} to {max_val:.2e}")
+            
+            # CRITICAL FIX: Handle zero minimum for logarithmic scale
+            if scale_mode == "Logarithmic":
+                if min_val <= 0:
+                    # Use flux cutoff or a fraction of max value
+                    cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
+                    min_val = max(cutoff, max_val * 1e-6)
+                    print(f"FIXED zero minimum for log scale: {min_val:.2e}")
+                
+                if max_val <= min_val:
+                    max_val = min_val * 1000
+                    print(f"FIXED invalid max for log scale: {max_val:.2e}")
+            
+            # Validate range is finite
+            if not (np.isfinite(min_val) and np.isfinite(max_val) and max_val > min_val):
+                print("FIXING invalid range with fallback")
+                min_val, max_val = 1e-5, 1e7
+            
+            print(f"Final range: {min_val:.2e} to {max_val:.2e}")
+            
+            # Set range FIRST
+            lut.SetRange(min_val, max_val)
+            
+            # Set colormap (simplified and reliable)
+            if colormap_name == "Plasma":
+                lut.SetHueRange(0.75, 0.083)
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(0.2, 0.95)
+            elif colormap_name == "Viridis":
+                lut.SetHueRange(0.583, 0.167)
+                lut.SetSaturationRange(0.8, 1.0)
+                lut.SetValueRange(0.2, 0.9)
+            else:  # Default Blue to Red
+                lut.SetHueRange(0.667, 0.0)
+                lut.SetSaturationRange(1.0, 1.0)
+                lut.SetValueRange(0.3, 1.0)
+            
+            # Build FIRST
+            lut.Build()
+            
+            # Set scale mode AFTER building
+            if scale_mode == "Logarithmic":
+                lut.SetScaleToLog10()
+                print("Applied logarithmic scaling")
+            else:
+                lut.SetScaleToLinear()
+                print("Applied linear scaling")
+            
+            # Rebuild after scale change
+            lut.Build()
+            
+            # Test the LUT - FIXED method call
+            test_val = (min_val + max_val) / 2
+            test_color = [0, 0, 0]
+            lut.GetColor(test_val, test_color)
+            print(f"Test color at {test_val:.2e}: {test_color}")
+            
+            if any(np.isnan(test_color)):
+                print("WARNING: NaN in colors, forcing linear")
+                lut.SetScaleToLinear()
+                lut.Build()
+            
+            print(f"=== LUT CREATION COMPLETE ===\n")
+            return lut
+            
+        except Exception as e:
+            print(f"ERROR in LUT creation: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Emergency fallback
+            lut.SetRange(1e-5, 1e7)
+            lut.SetHueRange(0.667, 0.0)
+            lut.SetScaleToLinear()
+            lut.Build()
+            return lut
+
+    def get_colormap_color(self, colormap_name, t):
+        """Get RGB color for given colormap at position t (0-1)"""
+        t = np.clip(t, 0, 1)
+
+        if colormap_name == "Viridis":
+            return self.get_viridis_color(t)
+        elif colormap_name == "Plasma":
+            return self.get_plasma_color(t)
+        elif colormap_name == "Grayscale":
+            return [t, t, t]
+        elif colormap_name == "Rainbow":
+            # HSV rainbow
+            hue = (1.0 - t) * 0.667  # Blue to red
+            return self.hsv_to_rgb(hue, 1.0, 1.0)
+        else:  # Blue to Red or default
+            return [t, 0.5, 1.0 - t]
+
+    def get_viridis_color(self, t):
+        """Approximate viridis colormap"""
+        if t < 0.25:
+            r, g, b = 0.267004 + t*0.183371, 0.004874 + t*0.478894, 0.329415 + t*0.511095
+        elif t < 0.5:
+            t_norm = (t - 0.25) / 0.25
+            r, g, b = 0.127568 + t_norm*0.253935, 0.566949 + t_norm*0.214982, 0.550556 + t_norm*(-0.133721)
+        elif t < 0.75:
+            t_norm = (t - 0.5) / 0.25
+            r, g, b = 0.369214 + t_norm*0.304662, 0.788675 + t_norm*0.138379, 0.382914 + t_norm*(-0.224125)
+        else:
+            t_norm = (t - 0.75) / 0.25
+            r, g, b = 0.663765 + t_norm*0.267004, 0.865006 + t_norm*0.104775, 0.197275 + t_norm*0.109709
+        return [r, g, b]
+
+    def get_plasma_color(self, t):
+        """Approximate plasma colormap"""
+        r = 0.050383 + t * (0.940015 - 0.050383)
+        g = 0.029803 + t * t * (0.975158 - 0.029803)
+        b = 0.527975 + t * (0.131326 - 0.527975)
+        return [r, g, b]
+
+    def hsv_to_rgb(self, h, s, v):
+        """Convert HSV to RGB"""
+        import colorsys
+        return list(colorsys.hsv_to_rgb(h, s, v))
+
+    def update_volume_transfer_functions(self):
+        """Update volume rendering transfer functions for log scale"""
+        if not hasattr(self, 'volume_actor') or not self.volume_actor:
+            return
+
+        try:
+            volume_property = self.volume_actor.GetProperty()
+            scalar_range = self.vtk_data.GetScalarRange()
+            scale_mode = self.scale_mode_combo.currentText()
+
+            # Create new transfer functions
+            color_func = vtk.vtkColorTransferFunction()
+            opacity_func = vtk.vtkPiecewiseFunction()
+
+            if scale_mode == "Logarithmic" and scalar_range[1] > scalar_range[0] and scalar_range[0] > 0:
+                # Log scale for volume rendering
+                log_min = np.log10(scalar_range[0])
+                log_max = np.log10(scalar_range[1])
+
+                # Create points in log space
+                for i in range(5):
+                    log_val = log_min + i * (log_max - log_min) / 4
+                    linear_val = 10**log_val
+                    t = i / 4.0
+
+                    # Color points
+                    if t < 0.25:
+                        color = [0.0, 0.0, 0.2 + t*0.8]
+                    elif t < 0.5:
+                        color = [0.0, (t-0.25)*4, 1.0]
+                    elif t < 0.75:
+                        color = [(t-0.5)*4, 1.0, 1.0-(t-0.5)*4]
+                    else:
+                        color = [1.0, 1.0-(t-0.75)*4, 0.0]
+
+                    color_func.AddRGBPoint(linear_val, color[0], color[1], color[2])
+
+                    # Opacity points (more transparent for low values)
+                    opacity = min(0.3, 0.05 + t * 0.25)
+                    opacity_func.AddPoint(linear_val, opacity)
+            else:
+                # Linear scale (original)
+                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)
+                color_func.AddRGBPoint(scalar_range[1] * 0.25, 0.0, 0.0, 1.0)
+                color_func.AddRGBPoint(scalar_range[1] * 0.5, 0.0, 1.0, 0.0)
+                color_func.AddRGBPoint(scalar_range[1] * 0.75, 1.0, 1.0, 0.0)
+                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)
+
+                opacity_func.AddPoint(scalar_range[0], 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.1, 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.05)
+                opacity_func.AddPoint(scalar_range[1] * 0.6, 0.1)
+                opacity_func.AddPoint(scalar_range[1], 0.2)
+
+            volume_property.SetColor(color_func)
+            volume_property.SetScalarOpacity(opacity_func)
+
+            self.vtk_widget.GetRenderWindow().Render()
+            print(f"Updated volume rendering to {scale_mode} scale")
+
+        except Exception as e:
+            print(f"Error updating volume transfer functions: {e}")
+
+        def change_colormap(self, colormap_name):
+            """Change the color mapping - UPDATED for scale awareness"""
+            try:
+                # Get current scale mode
+                scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
+
+                # Get scalar range
+                scalar_range = getattr(self, 'current_scalar_range', self.vtk_data.GetScalarRange() if self.vtk_data else (0, 1))
+
+                # Create new lookup table with current scale mode
+                new_lut = self.create_lookup_table_with_scale(colormap_name, scale_mode, scalar_range)
+
+                # Update all relevant mappers
+                if hasattr(self, 'field_actor') and self.field_actor:
+                    mapper = self.field_actor.GetMapper()
+                    if mapper:
+                        mapper.SetLookupTable(new_lut)
+
+                if hasattr(self, 'slice_actors'):
+                    for actor in self.slice_actors:
+                        if actor:
+                            mapper = actor.GetMapper()
+                            if mapper:
+                                mapper.SetLookupTable(new_lut)
+
+                # Update volume rendering if needed
+                if hasattr(self, 'volume_actor') and self.volume_actor:
+                    self.update_volume_transfer_functions()
+
+                # Update scalar bar
+                if hasattr(self, 'scalar_bar') and self.scalar_bar:
+                    self.scalar_bar.SetLookupTable(new_lut)
+
+                self.vtk_widget.GetRenderWindow().Render()
+                print(f"Changed colormap to: {colormap_name} ({scale_mode} scale)")
+
+            except Exception as e:
+                print(f"Error changing colormap: {e}")
+        
     def update_point_density(self, density):
         """COMPACT: Update point density with simple labeling"""
         self.point_density_label.setText(f"{density:,} points")
@@ -1916,7 +2425,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Error regenerating point cloud: {e}")
 
     def setup_point_cloud_rendering(self):
-        """Enhanced point cloud with adjustable density"""
+        """Point cloud rendering - RESTORED to working version with better range handling"""
         if not self.vtk_data:
             return
             
@@ -1933,7 +2442,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             num_points = self.vtk_data.GetNumberOfPoints()
             print(f"Point cloud: {num_points} points, range: {scalar_range}")
             
-            # Store values
+            # Store values for scale updates - USE RAW RANGE
             self.current_scalar_range = scalar_range
             
             # Get target density from slider
@@ -1942,30 +2451,20 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             
             print(f"Target density: {target_density} points")
             
-            # Analyze data distribution for smart thresholding
-            print("Analyzing data distribution...")
-            non_zero_count = 0
-            sample_size = min(1000, scalar_array.GetSize())
+            # Use flux cutoff for thresholding, but with fallback
+            cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
             
-            for i in range(sample_size):
-                if scalar_array.GetValue(i) > 0:
-                    non_zero_count += 1
-                    
-            non_zero_fraction = non_zero_count / sample_size
-            print(f"Non-zero values: {non_zero_count}/{sample_size} ({non_zero_fraction:.1%})")
-            
-            # Adaptive threshold
-            if non_zero_fraction > 0.5:
-                threshold_fraction = 0.02  # 2% for dense data
-            elif non_zero_fraction > 0.1:
-                threshold_fraction = 0.005  # 0.5% for medium data
-            else:
-                threshold_fraction = 0.001  # 0.1% for sparse data
+            # Determine threshold value
+            if cutoff > 0 and cutoff < scalar_range[1] * 0.1:  # Cutoff is reasonable
+                threshold_value = cutoff
+                print(f"Using flux cutoff: {threshold_value:.2e}")
+            else:  # Cutoff is too high or invalid, use percentage
+                threshold_value = scalar_range[1] * 0.001  # 0.1% of max
+                print(f"Cutoff too high, using 0.1% of max: {threshold_value:.2e}")
             
             # Apply threshold
             threshold = vtk.vtkThreshold()
             threshold.SetInputData(self.vtk_data)
-            threshold_value = scalar_range[1] * threshold_fraction
             threshold.SetLowerThreshold(threshold_value)
             threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
             threshold.Update()
@@ -1974,20 +2473,23 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             significant_points = significant_data.GetNumberOfPoints()
             print(f"Significant points (>{threshold_value:.2e}): {significant_points}")
             
-            # Fallback to lower thresholds if needed
+            # Fallback if no significant points
             if significant_points == 0:
-                for lower_fraction in [0.001, 0.0001, 0.0]:
-                    threshold_value = scalar_range[1] * lower_fraction if lower_fraction > 0 else 0
+                print("No points found, using lower threshold...")
+                for lower_fraction in [0.0001, 0.00001, 0.0]:
+                    threshold_value = scalar_range[1] * lower_fraction if lower_fraction > 0 else scalar_range[0]
                     threshold.SetLowerThreshold(threshold_value)
                     threshold.Update()
                     significant_data = threshold.GetOutput()
                     significant_points = significant_data.GetNumberOfPoints()
+                    print(f"  Trying threshold {threshold_value:.2e}: {significant_points} points")
                     if significant_points > 0 or lower_fraction == 0:
                         break
                         
-                if significant_points == 0:
-                    significant_data = self.vtk_data
-                    significant_points = num_points
+            if significant_points == 0:
+                print("Still no points, using all data")
+                significant_data = self.vtk_data
+                significant_points = num_points
             
             # Subsample to target density
             if significant_points > target_density:
@@ -2095,10 +2597,16 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.update_threshold()
             
     def change_visualization_mode(self, mode):
-        """Enhanced mode change with control visibility"""
+        """Enhanced mode change with dynamic control visibility"""
         # Show/hide relevant controls based on mode
+        self.point_cloud_controls.setVisible(mode == "Point Cloud")
         self.wireframe_controls.setVisible(mode == "Wireframe")
         self.slice_controls.setVisible(mode == "Slice Planes")
+        
+        # Show/hide sub-controls for wireframe
+        if mode == "Wireframe":
+            style = self.wireframe_style_combo.currentText()
+            self.isosurface_controls.setVisible(style == "Single Isosurface")
         
         # Call the original visualization change
         if not self.vtk_data:
@@ -2508,7 +3016,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             return input_data  # Return original if jitter fails
 
     def create_point_cloud_glyphs(self, point_data, radius):
-        """Create the actual glyph visualization"""
+        """Create the actual glyph visualization - ENSURE SCALAR RANGE IS PRESERVED"""
         if point_data.GetNumberOfPoints() == 0:
             print("No points to create glyphs for")
             return
@@ -2538,10 +3046,15 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             # Create mapper
             glyph_mapper = vtk.vtkPolyDataMapper()
             glyph_mapper.SetInputConnection(glyph.GetOutputPort())
-            glyph_mapper.SetScalarRange(self.current_scalar_range)
+            
+            # IMPORTANT: Use the original data range, not the filtered range
+            original_range = self.current_scalar_range
+            glyph_mapper.SetScalarRange(original_range)
             glyph_mapper.ScalarVisibilityOn()
             
-            # Setup lookup table
+            print(f"Mapper scalar range set to: {original_range}")
+            
+            # Setup lookup table with current settings
             lut = self.create_lookup_table(self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red')
             glyph_mapper.SetLookupTable(lut)
             
@@ -2559,10 +3072,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             opacity = self.opacity_slider.value() / 100.0 if hasattr(self, 'opacity_slider') else 0.7
             self.field_actor.GetProperty().SetOpacity(opacity)
             
-            # Setup scalar bar
-            if hasattr(self, 'current_scalar_range'):
-                scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
-                self.setup_scalar_bar(lut, scalar_name)
+            # Setup scalar bar with original range
+            scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
+            self.setup_scalar_bar(lut, scalar_name)
             
             print(f"Glyphs created successfully: {point_data.GetNumberOfPoints()} spheres, radius {radius}m")
             
@@ -2946,66 +3458,31 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Slice planes failed: {e}")
 
     def create_lookup_table(self, colormap_name):
-        """Create lookup table with better color schemes"""
-        lut = vtk.vtkLookupTable()
-        lut.SetNumberOfTableValues(256)
+        """Create lookup table - wrapper that uses current settings"""
+        # Get current scale mode
+        scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
         
-        try:
-            if colormap_name == "Blue to Red":
-                lut.SetHueRange(0.667, 0.0)  # Blue to red
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.3, 1.0)
-            elif colormap_name == "Viridis":
-                # Approximate viridis colormap
-                for i in range(256):
-                    t = i / 255.0
-                    if t < 0.25:
-                        r, g, b = 0.267004 + t*0.183371, 0.004874 + t*0.478894, 0.329415 + t*0.511095
-                    elif t < 0.5:
-                        t_norm = (t - 0.25) / 0.25
-                        r, g, b = 0.127568 + t_norm*0.253935, 0.566949 + t_norm*0.214982, 0.550556 + t_norm*(-0.133721)
-                    elif t < 0.75:
-                        t_norm = (t - 0.5) / 0.25
-                        r, g, b = 0.369214 + t_norm*0.304662, 0.788675 + t_norm*0.138379, 0.382914 + t_norm*(-0.224125)
-                    else:
-                        t_norm = (t - 0.75) / 0.25
-                        r, g, b = 0.663765 + t_norm*0.267004, 0.865006 + t_norm*0.104775, 0.197275 + t_norm*0.109709
-                    lut.SetTableValue(i, r, g, b, 1.0)
-            elif colormap_name == "Plasma":
-                # Approximate plasma colormap
-                for i in range(256):
-                    t = i / 255.0
-                    r = 0.050383 + t * (0.940015 - 0.050383)
-                    g = 0.029803 + t * t * (0.975158 - 0.029803)
-                    b = 0.527975 + t * (0.131326 - 0.527975)
-                    lut.SetTableValue(i, r, g, b, 1.0)
-            elif colormap_name == "Cool to Warm":
-                lut.SetHueRange(0.667, 0.0)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.4, 1.0)
-            elif colormap_name == "Rainbow":
-                lut.SetHueRange(0.0, 0.667)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(1.0, 1.0)
-            elif colormap_name == "Grayscale":
-                lut.SetHueRange(0.0, 0.0)
-                lut.SetSaturationRange(0.0, 0.0)
-                lut.SetValueRange(0.0, 1.0)
-            else:
-                # Default blue to red
-                lut.SetHueRange(0.667, 0.0)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.3, 1.0)
-                
-            lut.Build()
-            return lut
-            
-        except Exception as e:
-            print(f"Error creating lookup table: {e}")
-            # Return simple blue-to-red as fallback
-            lut.SetHueRange(0.667, 0.0)
-            lut.Build()
-            return lut
+        # Get scalar range from stored current range (not modified by cutoff)
+        if hasattr(self, 'current_scalar_range'):
+            original_range = self.current_scalar_range
+        else:
+            original_range = self.vtk_data.GetScalarRange() if self.vtk_data else (1e-5, 1e7)
+        
+        # Apply flux cutoff to create effective range for display
+        cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
+        effective_min = max(original_range[0], cutoff)
+        effective_max = original_range[1]
+        
+        # Ensure valid log range
+        if scale_mode == "Logarithmic":
+            if effective_min <= 0:
+                effective_min = effective_max * 1e-6 if effective_max > 0 else 1e-10
+            if effective_max <= effective_min:
+                effective_max = effective_min * 1000
+        
+        effective_range = (effective_min, effective_max)
+        
+        return self.create_lookup_table_with_scale(colormap_name, scale_mode, effective_range)
 
     def update_opacity(self, value):
         """Update field visualization opacity - FIXED"""
@@ -3699,8 +4176,10 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         print("=========================\n")
             
     def setup_scalar_bar(self, lut, scalar_name):
-        """ENHANCED: Setup scalar bar with proper units"""
+        """Setup scalar bar - FIXED"""
         try:
+            print(f"\n=== SETTING UP SCALAR BAR ===")
+            
             # Remove existing scalar bar
             if hasattr(self, 'scalar_bar') and self.scalar_bar:
                 self.renderer.RemoveViewProp(self.scalar_bar)
@@ -3708,35 +4187,39 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.scalar_bar = vtk.vtkScalarBarActor()
             self.scalar_bar.SetLookupTable(lut)
             
-            # Enhanced title with units
-            if scalar_name:
-                if "flux" in scalar_name.lower():
-                    title = "Electron Flux\n(particles/cm²/s)"
-                else:
-                    title = f"{scalar_name}\n(data units)"
+            # Get scale mode for title
+            scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
+            scale_text = "LOG" if scale_mode == "Logarithmic" else "LIN"
+            
+            if scalar_name and "flux" in scalar_name.lower():
+                title = f"Electron Flux ({scale_text})\n(particles/cm²/s)"
             else:
-                title = "Field Value\n(data units)"
-                
+                title = f"{scalar_name} ({scale_text})\n(data units)"
+                    
             self.scalar_bar.SetTitle(title)
             self.scalar_bar.SetPosition(0.85, 0.1)
             self.scalar_bar.SetWidth(0.12)
             self.scalar_bar.SetHeight(0.8)
             
-            # Improve scalar bar appearance
+            # Configure appearance
             self.scalar_bar.SetNumberOfLabels(6)
             self.scalar_bar.GetLabelTextProperty().SetColor(1, 1, 1)
             self.scalar_bar.GetTitleTextProperty().SetColor(1, 1, 1)
-            self.scalar_bar.GetTitleTextProperty().SetFontSize(11)
-            self.scalar_bar.GetLabelTextProperty().SetFontSize(9)
+            self.scalar_bar.GetTitleTextProperty().SetFontSize(10)
+            self.scalar_bar.GetLabelTextProperty().SetFontSize(8)
             
-            # Format numbers in scientific notation for better readability
-            self.scalar_bar.GetLabelTextProperty().SetJustificationToLeft()
+            # Debug the final range
+            if lut:
+                final_range = lut.GetRange()
+                print(f"Scalar bar LUT range: {final_range}")
             
             self.renderer.AddViewProp(self.scalar_bar)
-            print("Enhanced scalar bar with units added")
+            print(f"=== SCALAR BAR SETUP COMPLETE ===\n")
             
         except Exception as e:
-            print(f"Error setting up enhanced scalar bar: {e}")
+            print(f"Error setting up scalar bar: {e}")
+            import traceback
+            traceback.print_exc()
 
     def update_status_with_units(self):
         """ENHANCED: Update status display with proper units"""
