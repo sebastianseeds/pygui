@@ -594,7 +594,7 @@ class ElectronFluxVisualizer(QMainWindow):
         print("Dynamic coordinate axes with snap buttons added")
 
     def create_circle(self, radius, height, circle_type):
-        """Create a circle for latitude lines"""
+        """Create a circle for latitude lines - with proper default opacity"""
         try:
             # Create a circle in the XY plane
             circle_source = vtk.vtkRegularPolygonSource()
@@ -612,15 +612,18 @@ class ElectronFluxVisualizer(QMainWindow):
             circle_actor = vtk.vtkActor()
             circle_actor.SetMapper(circle_mapper)
             
+            # CRITICAL: Set to wireframe representation (lines only)
+            circle_actor.GetProperty().SetRepresentationToWireframe()
+            
             # Set properties based on type
             if circle_type == 'equator':
                 circle_actor.GetProperty().SetColor(1.0, 0.6, 0.0)  # Orange
                 circle_actor.GetProperty().SetLineWidth(2.5)
-                circle_actor.GetProperty().SetOpacity(0.8)
+                circle_actor.GetProperty().SetOpacity(0.72)  # 90% of default 80% Earth
             else:  # Regular latitude line
                 circle_actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray
                 circle_actor.GetProperty().SetLineWidth(1.5)
-                circle_actor.GetProperty().SetOpacity(0.6)
+                circle_actor.GetProperty().SetOpacity(0.64)  # 80% of default 80% Earth
             
             return circle_actor
             
@@ -840,51 +843,52 @@ class ElectronFluxVisualizer(QMainWindow):
         self.vtk_widget.GetRenderWindow().Render()
 
     def create_earth_representation(self):
-        """Create Earth with texture, lat/long grid, and opacity control"""
-        print("Creating Earth with texture, grid, and controls...")
+        """Create Earth - MODIFIED to not auto-create grid"""
+        print("Creating Earth (without automatic grid)...")
         
         try:
             # Remove existing Earth actors if they exist
             self.cleanup_existing_earth_actors()
             
-            # 1. Create Earth sphere
+            # Initialize lists (but don't populate them yet)
+            self.lat_long_actors = []
+            self.grid_labels = []
+            
+            # 1. Create Earth sphere (solid)
             print("Creating Earth sphere...")
             earth_sphere = vtk.vtkSphereSource()
             earth_sphere.SetRadius(6371.0)  # Earth radius in km
-            earth_sphere.SetThetaResolution(120)  # Higher resolution to reduce artifacts
+            earth_sphere.SetThetaResolution(120)
             earth_sphere.SetPhiResolution(120)
             earth_sphere.SetCenter(0.0, 0.0, 0.0)
             earth_sphere.Update()
             
-            # 2. Manually add correct texture coordinates
+            # 2. Add texture coordinates
             sphere_data = earth_sphere.GetOutput()
             self.add_correct_texture_coordinates(sphere_data)
             
-            # 3. Create mapper directly from sphere data
+            # 3. Create Earth mapper and actor (solid surface)
             earth_mapper = vtk.vtkPolyDataMapper()
             earth_mapper.SetInputData(sphere_data)
             
-            # 4. Create Earth actor
             self.earth_actor = vtk.vtkActor()
             self.earth_actor.SetMapper(earth_mapper)
             
-            # 5. Try to load and apply Earth texture
+            # 4. Apply Earth texture
             earth_texture = self.load_earth_texture()
             if earth_texture:
-                earth_texture.SetRepeat(0)  # Don't repeat texture
-                earth_texture.SetInterpolate(1)  # Smooth interpolation
-                # Additional settings to reduce artifacts
+                earth_texture.SetRepeat(0)
+                earth_texture.SetInterpolate(1)
                 earth_texture.SetWrap(vtk.vtkTexture.ClampToEdge)
                 self.earth_actor.SetTexture(earth_texture)
-                print("Earth texture applied with artifact fixes")
+                print("Earth texture applied")
             else:
-                # Fallback to solid color
-                print("Using fallback solid Earth color")
                 self.earth_actor.GetProperty().SetColor(0.2, 0.5, 0.8)
             
-            # 6. Set Earth properties with default opacity
+            # 5. Set Earth properties
             earth_property = self.earth_actor.GetProperty()
-            earth_property.SetOpacity(0.8)  # Default 80% opacity
+            earth_property.SetRepresentationToSurface()  # Solid surface for texture
+            earth_property.SetOpacity(0.8)
             earth_property.SetAmbient(0.4)
             earth_property.SetDiffuse(0.8)
             earth_property.SetSpecular(0.05)
@@ -893,84 +897,59 @@ class ElectronFluxVisualizer(QMainWindow):
             self.earth_actor.SetVisibility(True)
             self.renderer.AddActor(self.earth_actor)
             
-            # 7. Create latitude lines (every 15 degrees for better coverage)
-            print("Creating latitude grid lines...")
-            self.lat_long_actors = []
-            
-            for lat_deg in range(-75, 90, 15):  # Every 15 degrees, -75 to 75
-                lat_rad = np.radians(lat_deg)
-                radius = 6372.0 * np.cos(lat_rad)  # Slightly above Earth surface
-                height = 6372.0 * np.sin(lat_rad)
-                
-                if radius > 100:  # Skip very small circles near poles
-                    circle = self.create_circle(radius, height, 'lat')
-                    if circle:
-                        self.lat_long_actors.append(circle)
-                        self.renderer.AddActor(circle)
-            
-            # 8. Create longitude lines (every 15 degrees for full coverage)
-            print("Creating longitude grid lines...")
-            for lon_deg in range(0, 360, 15):  # Every 15 degrees, full 360°
-                meridian = self.create_meridian(lon_deg)
-                if meridian:
-                    self.lat_long_actors.append(meridian)
-                    self.renderer.AddActor(meridian)
-            
-            # 9. Create highlighted equator and prime meridian
-            print("Creating equator and prime meridian...")
-            self.equator_actor = self.create_circle(6372.5, 0.0, 'equator')
-            if self.equator_actor:
-                self.renderer.AddActor(self.equator_actor)
-            
-            # Create prime meridian (highlighted)
-            self.prime_meridian_actor = self.create_meridian(0, highlight=True)
-            if self.prime_meridian_actor:
-                self.renderer.AddActor(self.prime_meridian_actor)
-            
-            # 10. Add Earth opacity control to UI
-            #self.add_earth_opacity_control()
+            # NOTE: Grid is now created only when checkbox is checked
+            print("Earth created successfully (grid will be created when checkbox is checked)")
             
             # Force render
             if hasattr(self, 'vtk_widget'):
                 self.vtk_widget.GetRenderWindow().Render()
             
-            print("Earth with texture, grid, and opacity control created successfully")
             return True
             
         except Exception as e:
-            print(f"Error creating enhanced Earth: {e}")
+            print(f"Error creating Earth: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def create_earth_opacity_control(self, parent_layout):
-        """Create Earth opacity control and add it to the parent layout"""
+        """Create Earth opacity control with lat/long grid checkbox on the right"""
         try:
             # Create opacity control widget
             opacity_widget = QWidget()
-            opacity_layout = QHBoxLayout(opacity_widget)
+            opacity_layout = QHBoxLayout(opacity_widget)  # Back to HBox for single row
             opacity_layout.setContentsMargins(10, 5, 10, 5)
             opacity_layout.setSpacing(10)
             
-            # Add label
+            # Add Earth opacity label
             opacity_label = QLabel("Earth Opacity:")
             opacity_label.setStyleSheet("color: white; font-weight: bold;")
             opacity_layout.addWidget(opacity_label)
             
-            # Add slider
+            # Add opacity slider
             self.earth_opacity_slider = QSlider(Qt.Orientation.Horizontal)
             self.earth_opacity_slider.setRange(0, 100)
             self.earth_opacity_slider.setValue(80)  # Default 80%
-            self.earth_opacity_slider.setFixedWidth(150)
+            self.earth_opacity_slider.setFixedWidth(120)  # Slightly narrower to make room
             self.earth_opacity_slider.valueChanged.connect(self.update_earth_opacity)
             opacity_layout.addWidget(self.earth_opacity_slider)
             
-            # Add value label
+            # Add opacity value label
             self.earth_opacity_value_label = QLabel("80%")
             self.earth_opacity_value_label.setStyleSheet("color: white; font-weight: bold; min-width: 35px;")
             opacity_layout.addWidget(self.earth_opacity_value_label)
             
-            # Add spacer
+            # Add some space between opacity and checkbox
+            opacity_layout.addSpacing(15)
+            
+            # Add checkbox for lat/long grid (to the right of slider)
+            self.show_latlong_grid = QCheckBox("Show Lat/Long Grid")
+            self.show_latlong_grid.setChecked(False)  # Default unchecked
+            self.show_latlong_grid.setStyleSheet("color: white; font-weight: bold;")
+            self.show_latlong_grid.stateChanged.connect(self.toggle_latlong_grid)
+            opacity_layout.addWidget(self.show_latlong_grid)
+            
+            # Add final spacer to push everything left
             opacity_layout.addStretch()
             
             # Style the widget
@@ -997,50 +976,249 @@ class ElectronFluxVisualizer(QMainWindow):
                 QSlider::handle:horizontal:hover {
                     background: #aaa;
                 }
+                QCheckBox::indicator {
+                    width: 16px;
+                    height: 16px;
+                }
+                QCheckBox::indicator:unchecked {
+                    background-color: #333;
+                    border: 1px solid #666;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #4CAF50;
+                    border: 1px solid #45a049;
+                    border-radius: 3px;
+                }
             """)
             
-            opacity_widget.setFixedHeight(35)
+            opacity_widget.setFixedHeight(35)  # Back to single row height
             
             # Add to parent layout
             parent_layout.addWidget(opacity_widget)
             
-            print("Earth opacity control created successfully")
+            print("Earth opacity control with lat/long grid checkbox created successfully")
             
         except Exception as e:
             print(f"Error creating Earth opacity control: {e}")
 
+    def toggle_latlong_grid(self, state):
+        """Toggle lat/long grid and labels visibility"""
+        try:
+            show_grid = state == 2  # Qt.Checked = 2
+            print(f"Toggling lat/long grid: {'ON' if show_grid else 'OFF'}")
+            
+            if show_grid:
+                # Create or show the grid
+                if not hasattr(self, 'lat_long_actors') or not self.lat_long_actors:
+                    self.create_latlong_grid_and_labels()
+                else:
+                    # Show existing grid
+                    for actor in self.lat_long_actors:
+                        if actor:
+                            actor.SetVisibility(True)
+                    
+                    if hasattr(self, 'equator_actor') and self.equator_actor:
+                        self.equator_actor.SetVisibility(True)
+                    
+                    if hasattr(self, 'prime_meridian_actor') and self.prime_meridian_actor:
+                        self.prime_meridian_actor.SetVisibility(True)
+                        
+                    # Show labels
+                    if hasattr(self, 'grid_labels'):
+                        for label in self.grid_labels:
+                            if label:
+                                label.SetVisibility(True)
+            else:
+                # Hide the grid
+                if hasattr(self, 'lat_long_actors'):
+                    for actor in self.lat_long_actors:
+                        if actor:
+                            actor.SetVisibility(False)
+                
+                if hasattr(self, 'equator_actor') and self.equator_actor:
+                    self.equator_actor.SetVisibility(False)
+                
+                if hasattr(self, 'prime_meridian_actor') and self.prime_meridian_actor:
+                    self.prime_meridian_actor.SetVisibility(False)
+                    
+                # Hide labels
+                if hasattr(self, 'grid_labels'):
+                    for label in self.grid_labels:
+                        if label:
+                            label.SetVisibility(False)
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+                
+        except Exception as e:
+            print(f"Error toggling lat/long grid: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_latlong_grid_and_labels(self):
+        """Create lat/long grid with coordinate labels"""
+        try:
+            print("Creating lat/long grid with coordinate labels...")
+            
+            # Initialize lists
+            self.lat_long_actors = []
+            self.grid_labels = []
+            
+            # Get current Earth opacity for proper initial opacity
+            earth_opacity = self.earth_opacity_slider.value() / 100.0 if hasattr(self, 'earth_opacity_slider') else 0.8
+            
+            # Create latitude lines with labels
+            print("Creating latitude lines with labels...")
+            for lat_deg in range(-75, 90, 15):  # Every 15 degrees
+                lat_rad = np.radians(lat_deg)
+                radius = 6372.0 * np.cos(lat_rad)
+                height = 6372.0 * np.sin(lat_rad)
+                
+                if radius > 100:  # Skip very small circles near poles
+                    # Create latitude circle
+                    circle = self.create_circle(radius, height, 'lat')
+                    if circle:
+                        circle.GetProperty().SetOpacity(earth_opacity * 0.8)
+                        self.lat_long_actors.append(circle)
+                        self.renderer.AddActor(circle)
+                        
+                        # Create latitude label
+                        label = self.create_coordinate_label(f"{lat_deg}°", radius + 500, 0, height)
+                        if label:
+                            self.grid_labels.append(label)
+                            self.renderer.AddActor2D(label)
+            
+            # Create longitude lines with labels
+            print("Creating longitude lines with labels...")
+            for lon_deg in range(0, 360, 30):  # Every 30 degrees for longitude labels (less crowded)
+                # Create meridian
+                meridian = self.create_meridian(lon_deg)
+                if meridian:
+                    meridian.GetProperty().SetOpacity(earth_opacity * 0.8)
+                    self.lat_long_actors.append(meridian)
+                    self.renderer.AddActor(meridian)
+                    
+                    # Create longitude label at equator
+                    lon_rad = np.radians(lon_deg)
+                    x = 6872.0 * np.cos(lon_rad)  # 500km above Earth surface
+                    y = 6872.0 * np.sin(lon_rad)
+                    
+                    # Format longitude label
+                    if lon_deg == 0:
+                        lon_label = "0°"
+                    elif lon_deg <= 180:
+                        lon_label = f"{lon_deg}°E"
+                    else:
+                        lon_label = f"{360-lon_deg}°W"
+                        
+                    label = self.create_coordinate_label(lon_label, x, y, 0)
+                    if label:
+                        self.grid_labels.append(label)
+                        self.renderer.AddActor2D(label)
+            
+            # Create highlighted equator and prime meridian
+            print("Creating equator and prime meridian...")
+            self.equator_actor = self.create_circle(6372.5, 0.0, 'equator')
+            if self.equator_actor:
+                self.equator_actor.GetProperty().SetOpacity(earth_opacity * 0.9)
+                self.renderer.AddActor(self.equator_actor)
+            
+            self.prime_meridian_actor = self.create_meridian(0, highlight=True)
+            if self.prime_meridian_actor:
+                self.prime_meridian_actor.GetProperty().SetOpacity(earth_opacity * 0.9)
+                self.renderer.AddActor(self.prime_meridian_actor)
+            
+            print(f"Created {len(self.lat_long_actors)} grid actors and {len(self.grid_labels)} labels")
+            
+        except Exception as e:
+            print(f"Error creating lat/long grid and labels: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def create_coordinate_label(self, text, x, y, z):
+        """Create a 3D coordinate label"""
+        try:
+            # Create text source
+            text_source = vtk.vtkVectorText()
+            text_source.SetText(text)
+            text_source.Update()
+            
+            # Create follower (billboard text that always faces camera)
+            follower = vtk.vtkFollower()
+            
+            # Create mapper
+            text_mapper = vtk.vtkPolyDataMapper()
+            text_mapper.SetInputConnection(text_source.GetOutputPort())
+            follower.SetMapper(text_mapper)
+            
+            # Position the label
+            follower.SetPosition(x, y, z)
+            follower.SetScale(300, 300, 300)  # Scale to make visible
+            
+            # Set camera for billboard effect
+            if hasattr(self, 'renderer'):
+                camera = self.renderer.GetActiveCamera()
+                follower.SetCamera(camera)
+            
+            # Style the label
+            follower.GetProperty().SetColor(1.0, 1.0, 0.8)  # Light yellow
+            follower.GetProperty().SetOpacity(0.8)
+            
+            return follower
+            
+        except Exception as e:
+            print(f"Error creating coordinate label: {e}")
+            return None
+
     def update_earth_opacity(self, value):
-        """Update Earth opacity from slider"""
+        """Update Earth opacity - ALSO UPDATE GRID AND LABELS IF VISIBLE"""
         try:
             opacity = value / 100.0
             self.earth_opacity_value_label.setText(f"{value}%")
             
+            print(f"Updating Earth opacity to {value}% (opacity={opacity})")
+            
+            # Update main Earth actor
             if hasattr(self, 'earth_actor') and self.earth_actor:
                 self.earth_actor.GetProperty().SetOpacity(opacity)
+            
+            # Update grid lines if they're visible
+            if (hasattr(self, 'show_latlong_grid') and self.show_latlong_grid.isChecked() and
+                hasattr(self, 'lat_long_actors') and self.lat_long_actors):
                 
-                # Also update grid line opacity proportionally
-                grid_opacity = min(0.8, opacity + 0.2)  # Keep grid slightly more visible
+                grid_opacity = opacity * 0.8  # Grid is 80% of Earth opacity
                 
-                if hasattr(self, 'lat_long_actors'):
-                    for actor in self.lat_long_actors:
-                        if actor:
-                            actor.GetProperty().SetOpacity(grid_opacity * 0.6)
+                for actor in self.lat_long_actors:
+                    if actor and actor.GetVisibility():
+                        actor.GetProperty().SetOpacity(grid_opacity)
                 
-                if hasattr(self, 'equator_actor') and self.equator_actor:
-                    self.equator_actor.GetProperty().SetOpacity(grid_opacity * 0.8)
+                # Update special lines
+                if hasattr(self, 'equator_actor') and self.equator_actor and self.equator_actor.GetVisibility():
+                    self.equator_actor.GetProperty().SetOpacity(opacity * 0.9)
                     
-                if hasattr(self, 'prime_meridian_actor') and self.prime_meridian_actor:
-                    self.prime_meridian_actor.GetProperty().SetOpacity(grid_opacity * 0.8)
+                if hasattr(self, 'prime_meridian_actor') and self.prime_meridian_actor and self.prime_meridian_actor.GetVisibility():
+                    self.prime_meridian_actor.GetProperty().SetOpacity(opacity * 0.9)
                 
-                # Force render
-                if hasattr(self, 'vtk_widget'):
-                    self.vtk_widget.GetRenderWindow().Render()
+                # Update labels
+                if hasattr(self, 'grid_labels'):
+                    label_opacity = opacity * 0.8
+                    for label in self.grid_labels:
+                        if label and label.GetVisibility():
+                            label.GetProperty().SetOpacity(label_opacity)
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
                     
         except Exception as e:
             print(f"Error updating Earth opacity: {e}")
+            import traceback
+            traceback.print_exc()
         
     def create_meridian(self, longitude_deg, highlight=False):
-        """Create a meridian (longitude line) from pole to pole"""
+        """Create a meridian with proper default opacity"""
         try:
             lon_rad = np.radians(longitude_deg)
             
@@ -1080,11 +1258,11 @@ class ElectronFluxVisualizer(QMainWindow):
             if highlight:  # Prime meridian or special meridian
                 meridian_actor.GetProperty().SetColor(1.0, 0.6, 0.0)  # Orange
                 meridian_actor.GetProperty().SetLineWidth(2.5)
-                meridian_actor.GetProperty().SetOpacity(0.8)
+                meridian_actor.GetProperty().SetOpacity(0.72)  # 90% of default 80% Earth
             else:  # Regular meridian
                 meridian_actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray
                 meridian_actor.GetProperty().SetLineWidth(1.5)
-                meridian_actor.GetProperty().SetOpacity(0.6)
+                meridian_actor.GetProperty().SetOpacity(0.64)  # 80% of default 80% Earth
             
             return meridian_actor
             
@@ -1093,9 +1271,9 @@ class ElectronFluxVisualizer(QMainWindow):
             return None
 
     def add_correct_texture_coordinates(self, sphere_data):
-        """Add texture coordinates with proper seam handling to eliminate artifacts"""
+        """Add texture coordinates with Pacific-specific seam fix"""
         try:
-            print("Computing texture coordinates with seam artifact fix...")
+            print("Computing texture coordinates with Pacific-specific seam fix...")
             
             points = sphere_data.GetPoints()
             num_points = points.GetNumberOfPoints()
@@ -1114,33 +1292,40 @@ class ElectronFluxVisualizer(QMainWindow):
                 # Convert to spherical coordinates
                 r = np.sqrt(x*x + y*y + z*z)
                 
-                # Calculate longitude (u coordinate) with special seam handling
+                # PACIFIC SEAM FIX: Use a different longitude calculation
+                # Instead of atan2(y, x), shift the coordinate system
                 longitude = np.arctan2(y, x)  # -π to π
                 
-                # Handle the seam at ±π (International Date Line)
-                # This is the key fix for the Pacific artifact
-                if longitude < 0:
-                    longitude += 2 * np.pi  # Convert to 0 to 2π
-                    
-                u = longitude / (2 * np.pi)  # 0 to 1
+                # Shift longitude to avoid the Pacific seam
+                # Move the "seam" from the Pacific to somewhere over Africa/Atlantic
+                longitude_shifted = longitude + np.pi  # 0 to 2π, seam now at Greenwich
+                if longitude_shifted >= 2 * np.pi:
+                    longitude_shifted -= 2 * np.pi
                 
-                # Add small epsilon to prevent exact 0 or 1 values that cause seams
-                epsilon = 1e-6
-                u = max(epsilon, min(1.0 - epsilon, u))
+                # Map to texture coordinates
+                u = longitude_shifted / (2 * np.pi)  # 0 to 1
                 
-                # Calculate latitude (v coordinate)
-                latitude = np.arcsin(np.clip(z / r, -1.0, 1.0))  # -π/2 to π/2
+                # Ensure we don't hit exact 0 or 1
+                epsilon = 0.0005  # Small safety margin
+                u = np.clip(u, epsilon, 1.0 - epsilon)
+                
+                # Calculate latitude (v coordinate) - standard calculation
+                if r > 0:
+                    latitude = np.arcsin(np.clip(z / r, -1.0, 1.0))  # -π/2 to π/2
+                else:
+                    latitude = 0
                 
                 # Map latitude to texture coordinates (0 to 1)
                 v = (latitude + np.pi/2) / np.pi  # 0 to 1
-                v = max(epsilon, min(1.0 - epsilon, v))
+                v = np.clip(v, epsilon, 1.0 - epsilon)
                 
                 # Set texture coordinates
                 tex_coords.SetTuple2(i, u, v)
             
             # Add texture coordinates to the sphere data
             sphere_data.GetPointData().SetTCoords(tex_coords)
-            print(f"Added seam-fixed texture coordinates for {num_points} points")
+            print(f"Added Pacific-specific seam-fixed texture coordinates for {num_points} points")
+            print("Longitude seam moved from Pacific to Greenwich meridian")
             
         except Exception as e:
             print(f"Error computing texture coordinates: {e}")
@@ -1148,7 +1333,7 @@ class ElectronFluxVisualizer(QMainWindow):
             traceback.print_exc()
 
     def load_earth_texture(self):
-        """Load Earth texture with proper handling"""
+        """Load Earth texture - REVERTED to original working version"""
         try:
             # List of possible texture files
             texture_files = [
@@ -1175,7 +1360,7 @@ class ElectronFluxVisualizer(QMainWindow):
             return None
 
     def try_load_texture_file(self, filename):
-        """Try to load a specific texture file with settings to prevent artifacts"""
+        """Try to load a specific texture file - REVERTED to original working version"""
         try:
             import os
             
@@ -1197,18 +1382,17 @@ class ElectronFluxVisualizer(QMainWindow):
             if reader.GetOutput().GetNumberOfPoints() == 0:
                 return None
             
-            # Create texture with specific settings to prevent artifacts
+            # Create texture with ORIGINAL settings that were working
             texture = vtk.vtkTexture()
             texture.SetInputConnection(reader.GetOutputPort())
             texture.InterpolateOn()  # Smooth interpolation
             texture.RepeatOff()      # Don't repeat - this is crucial
             texture.EdgeClampOn()    # Clamp edges
             
-            # Additional settings to prevent seam artifacts
+            # ONLY the essential seam prevention setting
             texture.SetWrap(vtk.vtkTexture.ClampToEdge)
-            texture.SetQualityTo32Bit()  # Higher quality
             
-            print(f"Loaded texture {filename} with anti-artifact settings")
+            print(f"Loaded texture {filename} with basic seam prevention")
             return texture
             
         except Exception as e:
@@ -1216,9 +1400,9 @@ class ElectronFluxVisualizer(QMainWindow):
             return None
 
     def create_procedural_earth_texture(self):
-        """Create a simple procedural Earth texture (improved)"""
+        """Create a simple procedural Earth texture - CLEAN VERSION"""
         try:
-            print("Creating improved procedural Earth texture...")
+            print("Creating procedural Earth texture...")
             
             # Standard equirectangular dimensions
             width, height = 1024, 512
@@ -1261,7 +1445,7 @@ class ElectronFluxVisualizer(QMainWindow):
                     image.SetScalarComponentFromFloat(x, y, 0, 1, g)
                     image.SetScalarComponentFromFloat(x, y, 0, 2, b)
             
-            # Create texture
+            # Create texture with BASIC settings only
             texture = vtk.vtkTexture()
             texture.SetInputData(image)
             texture.InterpolateOn()
@@ -1412,10 +1596,11 @@ class ElectronFluxVisualizer(QMainWindow):
     #         print(f"Error updating Earth opacity: {e}")
     
     def cleanup_existing_earth_actors(self):
-        """Clean up all existing Earth-related actors"""
+        """Clean up all existing Earth-related actors - INCLUDING LABELS"""
+        print("Cleaning up existing Earth actors...")
+        
         actors_to_cleanup = [
-            'earth_actor', 'ocean_actor', 'earth_wireframe_actor', 
-            'equator_actor', 'prime_meridian_actor'
+            'earth_actor', 'equator_actor', 'prime_meridian_actor'
         ]
         
         for actor_name in actors_to_cleanup:
@@ -1423,14 +1608,24 @@ class ElectronFluxVisualizer(QMainWindow):
                 actor = getattr(self, actor_name)
                 if actor:
                     self.renderer.RemoveActor(actor)
-                    setattr(self, actor_name, None)
+                    print(f"Removed {actor_name}")
+                setattr(self, actor_name, None)
         
-        # Clean up actor lists
+        # Clean up grid actor lists
         if hasattr(self, 'lat_long_actors') and self.lat_long_actors:
-            for actor in self.lat_long_actors:
+            for i, actor in enumerate(self.lat_long_actors):
                 if actor:
                     self.renderer.RemoveActor(actor)
+            print(f"Removed {len(self.lat_long_actors)} lat/long grid actors")
             self.lat_long_actors = []
+            
+        # Clean up label lists
+        if hasattr(self, 'grid_labels') and self.grid_labels:
+            for i, label in enumerate(self.grid_labels):
+                if label:
+                    self.renderer.RemoveActor2D(label)
+            print(f"Removed {len(self.grid_labels)} grid labels")
+            self.grid_labels = []
 
     def download_earth_texture(self):
         """Download a free Earth texture (helper function)"""
