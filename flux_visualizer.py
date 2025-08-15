@@ -5352,7 +5352,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         )
         
     def load_orbital_data(self):
-        """Load orbital CSV data - UPDATED to respect hide orbital paths setting"""
+        """Load orbital CSV data - UPDATED with legend creation"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Orbital Data", "", "CSV Files (*.csv);;All Files (*)"
         )
@@ -5361,6 +5361,10 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             return
             
         try:
+            # Store the filename for the legend
+            self.satellite_file_name = self.extract_filename_from_path(file_path)
+            print(f"Loading orbital data from: {self.satellite_file_name}")
+            
             # Read CSV file
             df = pd.read_csv(file_path)
             
@@ -5392,19 +5396,152 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             # Create path visualization (will respect hide checkbox if it exists)
             self.create_path_visualization()
             
+            # Create satellite legend
+            self.create_satellite_legend()
+            
             # Reset animation
             self.reset_animation()
             
-            # Update status message to mention the hide checkbox
+            # Update status message
             status_msg = (
-                f"Loaded orbital data: {len(self.orbital_path)} points "
+                f"✓ Loaded orbital data: {len(self.orbital_path)} points "
                 f"over {self.orbital_path[-1].time:.2f} hours\n"
+                f"Satellite: {self.satellite_file_name}\n"
                 f"Use 'Hide Orbital Paths' checkbox to toggle path visibility"
             )
             self.status_label.setText(status_msg)
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load orbital data:\n{str(e)}")
+
+    def create_satellite_legend(self):
+        """Create a legend showing the satellite name with colored indicator"""
+        try:
+            if not hasattr(self, 'satellite_file_name') or not self.satellite_file_name:
+                return
+                
+            # Remove existing legend if it exists
+            self.cleanup_satellite_legend()
+                
+            # Create legend as a QWidget overlay
+            self.legend_widget = QWidget(self.vtk_widget)
+            self.legend_widget.setGeometry(10, 80, 300, 30)  # Position below View buttons
+            
+            # Create horizontal layout for the legend
+            legend_layout = QHBoxLayout(self.legend_widget)
+            legend_layout.setContentsMargins(5, 5, 5, 5)
+            legend_layout.setSpacing(8)
+            
+            # Create colored indicator (small colored square)
+            self.legend_color_indicator = QLabel()
+            self.legend_color_indicator.setFixedSize(16, 16)
+            
+            # Set background color to match satellite
+            if hasattr(self, 'chosen_color'):
+                r, g, b = self.chosen_color
+                color_style = f"background-color: rgb({int(r*255)}, {int(g*255)}, {int(b*255)}); border: 1px solid white; border-radius: 2px;"
+            else:
+                color_style = "background-color: rgb(255, 255, 255); border: 1px solid white; border-radius: 2px;"
+            
+            self.legend_color_indicator.setStyleSheet(color_style)
+            
+            # Create text label
+            self.legend_text_label = QLabel(f"Satellite: {self.satellite_file_name}")
+            self.legend_text_label.setStyleSheet("""
+                QLabel {
+                    color: white;
+                    font-weight: bold;
+                    font-size: 12px;
+                    background-color: rgba(0, 0, 0, 120);
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                }
+            """)
+            
+            # Add to layout
+            legend_layout.addWidget(self.legend_color_indicator)
+            legend_layout.addWidget(self.legend_text_label)
+            legend_layout.addStretch()  # Push everything to the left
+            
+            # Style the container widget
+            self.legend_widget.setStyleSheet("""
+                QWidget {
+                    background-color: rgba(40, 40, 40, 150);
+                    border: 1px solid #666;
+                    border-radius: 5px;
+                }
+            """)
+            
+            # Show the legend
+            self.legend_widget.show()
+            self.legend_widget.raise_()
+            
+            print(f"Created satellite legend: {self.satellite_file_name}")
+            
+        except Exception as e:
+            print(f"Error creating satellite legend: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    def update_satellite_legend(self):
+        """Update the legend when satellite changes"""
+        if hasattr(self, 'satellite_file_name') and self.satellite_file_name:
+            self.create_satellite_legend()
+            
+    def cleanup_satellite_legend(self):
+        """Clean up satellite legend components"""
+        try:
+            # Remove the widget-based legend
+            if hasattr(self, 'legend_widget'):
+                self.legend_widget.deleteLater()
+                delattr(self, 'legend_widget')
+                
+            if hasattr(self, 'legend_color_indicator'):
+                delattr(self, 'legend_color_indicator')
+                
+            if hasattr(self, 'legend_text_label'):
+                delattr(self, 'legend_text_label')
+                
+            # Remove any old VTK-based legend actors (cleanup from previous approach)
+            if hasattr(self, 'satellite_legend_actor'):
+                self.renderer.RemoveActor2D(self.satellite_legend_actor)
+                delattr(self, 'satellite_legend_actor')
+                
+            if hasattr(self, 'legend_indicator_actor'):
+                self.renderer.RemoveActor(self.legend_indicator_actor)
+                delattr(self, 'legend_indicator_actor')
+                
+            print("Cleaned up satellite legend")
+            
+        except Exception as e:
+            print(f"Error cleaning up satellite legend: {e}")
+            
+    def extract_filename_from_path(self, file_path):
+        """Extract just the filename from a full path"""
+        try:
+            from pathlib import Path
+            return Path(file_path).stem  # Gets filename without extension
+        except:
+            # Fallback for simple extraction
+            return file_path.split('/')[-1].split('\\')[-1].split('.')[0]
+
+    def cleanup_satellite_legend(self):
+        """Clean up satellite legend actors"""
+        try:
+            # Remove text legend
+            if hasattr(self, 'satellite_legend_actor'):
+                self.renderer.RemoveActor2D(self.satellite_legend_actor)
+                delattr(self, 'satellite_legend_actor')
+                
+            # Remove color indicator
+            if hasattr(self, 'legend_indicator_actor'):
+                self.renderer.RemoveActor(self.legend_indicator_actor)
+                delattr(self, 'legend_indicator_actor')
+                
+            print("Cleaned up satellite legend")
+            
+        except Exception as e:
+            print(f"Error cleaning up satellite legend: {e}")
             
     def create_path_visualization(self):
         """Create 3D orbital path visualization with improved styling - UPDATED for visibility control"""
@@ -5583,8 +5720,11 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         if abs(pos[0]) < 10 and abs(pos[1]) < 10 and abs(pos[2]) < 10:
             print("WARNING: Satellite is at origin - might be hidden inside Earth!")
         
+        # Update satellite legend with new color
+        self.update_satellite_legend()
+        
         print("=== SATELLITE INFO COMPLETE ===\n")
-
+        
     def create_satellite_trail(self):
         """Create fading and tapering trail with multiple segments"""
         if len(self.trail_points) < 2:
@@ -5746,38 +5886,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         # Force render
         self.vtk_widget.GetRenderWindow().Render()
 
-    def debug_trail_system(self):
-        """Debug method to check trail system state"""
-        print("\n=== TRAIL SYSTEM DEBUG ===")
-        
-        print(f"Trail points: {len(self.trail_points) if hasattr(self, 'trail_points') else 'None'}")
-        if hasattr(self, 'trail_points') and self.trail_points:
-            for i, point in enumerate(self.trail_points):
-                print(f"  Point {i}: ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f})")
-        
-        print(f"Trail actor exists: {hasattr(self, 'trail_actor') and self.trail_actor is not None}")
-        if hasattr(self, 'trail_actor') and self.trail_actor:
-            print(f"  Visibility: {self.trail_actor.GetVisibility()}")
-            print(f"  Opacity: {self.trail_actor.GetProperty().GetOpacity()}")
-            print(f"  Color: {self.trail_actor.GetProperty().GetColor()}")
-            
-        # Check renderer
-        actors = self.renderer.GetActors()
-        actors.InitTraversal()
-        actor_count = 0
-        trail_in_renderer = False
-        while True:
-            actor = actors.GetNextActor()
-            if not actor:
-                break
-            actor_count += 1
-            if hasattr(self, 'trail_actor') and actor == self.trail_actor:
-                trail_in_renderer = True
-                
-        print(f"Total actors in renderer: {actor_count}")
-        print(f"Trail actor in renderer: {trail_in_renderer}")
-        print("=========================\n")
-
     def animation_step(self):
         """Perform one animation step with wraparound - no debug output"""
         if not self.orbital_path:
@@ -5825,7 +5933,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.stop_button.setEnabled(True)
 
     def reset_animation(self):
-        """Reset animation - ENHANCED for multiple trail actors"""
+        """Reset animation - ENHANCED for multiple trail actors and legend cleanup"""
         print("\n=== RESETTING ANIMATION ===")
         
         self.current_time_index = 0
@@ -5852,8 +5960,8 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.flux_time_window.clear_data()
             
         # Force new satellite color and recreate
-        if hasattr(self, 'satellite_color'):
-            delattr(self, 'satellite_color')
+        if hasattr(self, 'chosen_color'):
+            delattr(self, 'chosen_color')
             
         if hasattr(self, 'orbital_path') and self.orbital_path:
             self.create_object_representation()
@@ -6122,14 +6230,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         """Set animation speed"""
         if self.is_playing:
             self.animation_timer.setInterval(speed_ms)
-            
-    def update_cross_section(self, radius):
-        """Update object cross section"""
-        self.flux_analyzer.set_cross_section(radius)
-        if hasattr(self, 'object_actor'):
-            self.renderer.RemoveActor(self.object_actor)
-            self.create_object_representation()
-            self.vtk_widget.GetRenderWindow().Render()
             
     def reset_animation(self):
         """Reset animation"""
