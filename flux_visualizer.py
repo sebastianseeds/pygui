@@ -5471,7 +5471,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         """Create satellite with DETAILED color debugging"""
         import random
         
-        print("\n=== SATELLITE COLOR DEBUG ===")
+        print("\n=== SATELLITE INFO ===")
         
         # Calculate size
         base_radius = max(self.cross_section_spinbox.value() * 100.0, 500.0)
@@ -5483,19 +5483,21 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         if hasattr(self, 'satellite_border_actor'):
             self.renderer.RemoveActor(self.satellite_border_actor)
         
-        # Generate color
-        colors = [
-            [1.0, 0.2, 0.2],  # Bright red
-            [0.2, 1.0, 0.2],  # Bright green  
-            [1.0, 0.2, 1.0],  # Bright magenta
-            [0.2, 0.8, 1.0],  # Bright cyan
-            [1.0, 0.8, 0.2],  # Bright orange
-            [0.8, 0.2, 1.0],  # Bright purple
-            [1.0, 0.5, 0.8],  # Bright pink
-            [0.2, 1.0, 0.8],  # Bright teal
-        ]
-        chosen_color = random.choice(colors)
-        print(f"Chosen color: {chosen_color}")
+        # Generate color ONLY if we don't already have one (MINIMAL FIX)
+        if not hasattr(self, 'chosen_color'):
+            colors = [
+                [1.0, 0.2, 0.2],  # Bright red
+                [0.2, 1.0, 0.2],  # Bright green  
+                [1.0, 0.2, 1.0],  # Bright magenta
+                [0.2, 0.8, 1.0],  # Bright cyan
+                [1.0, 0.8, 0.2],  # Bright orange
+                [0.8, 0.2, 1.0],  # Bright purple
+                [1.0, 0.5, 0.8],  # Bright pink
+                [0.2, 1.0, 0.8],  # Bright teal
+            ]
+            self.chosen_color = random.choice(colors)
+        
+        print(f"Chosen color: {self.chosen_color}")
         
         # Create sphere
         sphere = vtk.vtkSphereSource()
@@ -5519,7 +5521,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         # Apply color
         prop = self.object_actor.GetProperty()
         print(f"Property color BEFORE: {prop.GetColor()}")
-        prop.SetColor(chosen_color[0], chosen_color[1], chosen_color[2])
+        prop.SetColor(self.chosen_color[0], self.chosen_color[1], self.chosen_color[2])
         print(f"Property color AFTER: {prop.GetColor()}")
         
         prop.SetAmbient(0.9)
@@ -5581,7 +5583,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         if abs(pos[0]) < 10 and abs(pos[1]) < 10 and abs(pos[2]) < 10:
             print("WARNING: Satellite is at origin - might be hidden inside Earth!")
         
-        print("=== SATELLITE DEBUG COMPLETE ===\n")
+        print("=== SATELLITE INFO COMPLETE ===\n")
 
     def create_satellite_trail(self):
         """Create fading and tapering trail with multiple segments"""
