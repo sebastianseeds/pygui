@@ -1764,9 +1764,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Re-added {readded_grid_count} lat/long grid actors")
         
     def setup_visualization_controls(self):
-        """Enhanced controls with 1e-8 default cutoff"""
-        
-        # Find the control layout
+        """Enhanced controls with volume threshold control integrated below mode selector"""
+
+        # Find the control layout (existing code)
         control_layout = None
         for i in range(self.control_layout.count()):
             item = self.control_layout.itemAt(i)
@@ -1774,15 +1774,15 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 control_layout = self.control_layout
                 insert_index = i + 1
                 break
-        
+
         if not control_layout:
             control_layout = self.control_layout
             insert_index = -1
-        
+
         # Create visualization controls group
         viz_group = QGroupBox("Field Visualization")
         viz_layout = QVBoxLayout(viz_group)
-        
+
         # Visualization mode selection
         mode_layout = QFormLayout()
         self.viz_mode_combo = QComboBox()
@@ -1797,16 +1797,55 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.viz_mode_combo.setCurrentText("Point Cloud")
         self.viz_mode_combo.currentTextChanged.connect(self.change_visualization_mode)
         mode_layout.addRow("Visualization Mode:", self.viz_mode_combo)
-        
+
         viz_layout.addLayout(mode_layout)
-        
-        # === DYNAMIC CONTROLS FOR SPECIFIC MODES ===
-        
-        # Point Cloud Controls (only visible when Point Cloud is selected)
+
+        # Volume Rendering Controls with LONGER slider
+        self.volume_controls = QWidget()
+        volume_layout = QVBoxLayout(self.volume_controls)  # Changed to VBoxLayout for stacking
+
+        # Volume Flux Threshold Control with label below for longer slider
+
+        # Title for the control
+        threshold_title = QLabel("Flux Threshold:")
+        threshold_title.setStyleSheet("font-weight: bold;")
+        volume_layout.addWidget(threshold_title)
+
+        # Slider gets full width (much longer)
+        self.volume_threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_threshold_slider.setRange(0, 100)
+        self.volume_threshold_slider.setValue(50)  # Start at 50% = exactly 90th percentile
+        self.volume_threshold_slider.valueChanged.connect(self.update_volume_threshold)
+        self.volume_threshold_slider.setMinimumWidth(300)  # Ensure it's nice and long
+        volume_layout.addWidget(self.volume_threshold_slider)
+
+        # Label below the slider (centered)
+        self.volume_threshold_label = QLabel("90th percentile")
+        self.volume_threshold_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
+        self.volume_threshold_label.setStyleSheet("color: #ddd; font-size: 11px; margin-top: 2px;")
+        volume_layout.addWidget(self.volume_threshold_label)
+
+        # Add explanation text (more compact since we have more space)
+        explanation_label = QLabel(
+            "Dual-scale: 0-50% = 1st-90th percentile | 50-100% = 90th-99.9th percentile"
+        )
+        explanation_label.setStyleSheet("color: #aaa; font-size: 9px; margin-top: 5px;")
+        explanation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        explanation_label.setWordWrap(True)
+        volume_layout.addWidget(explanation_label)
+
+        # Add some spacing
+        volume_layout.addSpacing(5)
+
+        # Initially hide volume controls
+        self.volume_controls.setVisible(False)
+        viz_layout.addWidget(self.volume_controls)
+
+        # Point Cloud Controls (existing pattern - keep horizontal layout for comparison)
         self.point_cloud_controls = QWidget()
         pc_layout = QFormLayout(self.point_cloud_controls)
-        
-        # Point Density Control
+
+        # Point Density Control (keep existing horizontal layout)
         density_row = QHBoxLayout()
         density_row.addWidget(QLabel("Point Density:"))
         self.point_density_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1818,8 +1857,8 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         density_row.addWidget(self.point_density_slider)
         density_row.addWidget(self.point_density_label)
         pc_layout.addRow(density_row)
-        
-        # Point Size Control
+
+        # Point Size Control (keep existing horizontal layout)
         point_size_row = QHBoxLayout()
         point_size_row.addWidget(QLabel("Point Size:"))
         self.point_size_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1831,16 +1870,16 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         point_size_row.addWidget(self.point_size_slider)
         point_size_row.addWidget(self.point_size_label)
         pc_layout.addRow(point_size_row)
-        
+
         # Show point cloud controls initially (since Point Cloud is default)
         self.point_cloud_controls.setVisible(True)
         viz_layout.addWidget(self.point_cloud_controls)
-        
-        # Wireframe Style Controls (only visible when Wireframe is selected)
+
+        # Wireframe Style Controls (existing pattern)
         self.wireframe_controls = QWidget()
         wireframe_layout = QFormLayout(self.wireframe_controls)
-        
-        # Wireframe style selector
+
+        # Wireframe style selector (keep existing)
         style_row = QHBoxLayout()
         style_row.addWidget(QLabel("Wireframe Style:"))
         self.wireframe_style_combo = QComboBox()
@@ -1852,11 +1891,11 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.wireframe_style_combo.currentTextChanged.connect(self.change_wireframe_style)
         style_row.addWidget(self.wireframe_style_combo)
         wireframe_layout.addRow(style_row)
-        
-        # Isosurface Level Slider
+
+        # Isosurface Level Slider (keep existing horizontal layout)
         self.isosurface_controls = QWidget()
         iso_layout = QFormLayout(self.isosurface_controls)
-        
+
         iso_slider_row = QHBoxLayout()
         iso_slider_row.addWidget(QLabel("Contour Level:"))
         self.isosurface_level_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1868,19 +1907,19 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         iso_slider_row.addWidget(self.isosurface_level_slider)
         iso_slider_row.addWidget(self.isosurface_level_label)
         iso_layout.addRow(iso_slider_row)
-        
+
         wireframe_layout.addRow(self.isosurface_controls)
         self.isosurface_controls.setVisible(False)  # Initially hidden
-        
+
         # Initially hide wireframe controls
         self.wireframe_controls.setVisible(False)
         viz_layout.addWidget(self.wireframe_controls)
-        
-        # Slice Plane Controls (only visible when Slice Planes is selected)
+
+        # Slice Plane Controls (existing pattern)
         self.slice_controls = QWidget()
         slice_layout = QFormLayout(self.slice_controls)
-        
-        # Slice axis selector
+
+        # Slice axis selector (keep existing)
         axis_row = QHBoxLayout()
         axis_row.addWidget(QLabel("Slice Orientation:"))
         self.slice_axis_combo = QComboBox()
@@ -1893,8 +1932,8 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.slice_axis_combo.currentTextChanged.connect(self.change_slice_axis)
         axis_row.addWidget(self.slice_axis_combo)
         slice_layout.addRow(axis_row)
-        
-        # Slice Position Slider
+
+        # Slice Position Slider (keep existing horizontal layout)
         slice_pos_row = QHBoxLayout()
         slice_pos_row.addWidget(QLabel("Position:"))
         self.slice_position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1906,15 +1945,15 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         slice_pos_row.addWidget(self.slice_position_slider)
         slice_pos_row.addWidget(self.slice_position_label)
         slice_layout.addRow(slice_pos_row)
-        
+
         # Initially hide slice controls
         self.slice_controls.setVisible(False)
         viz_layout.addWidget(self.slice_controls)
-        
+
         # === PERMANENT CONTROLS FOR ALL MODES ===
         permanent_layout = QFormLayout()
-        
-        # Transparency control (permanent)
+
+        # Transparency control (permanent) - keep horizontal layout
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(QLabel("Transparency:"))
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1926,29 +1965,26 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         opacity_row.addWidget(self.opacity_slider)
         opacity_row.addWidget(self.opacity_label)
         permanent_layout.addRow(opacity_row)
-        
-        # Min Flux Cutoff (permanent) - DEFAULT TO 1e-8
+
+        # Min Flux Cutoff (permanent) - keep horizontal layout
         cutoff_row = QHBoxLayout()
         cutoff_row.addWidget(QLabel("Min Flux Cutoff:"))
-        
-        # Create a line edit for scientific notation input
+
         self.flux_cutoff_edit = QLineEdit()
-        self.flux_cutoff_edit.setText("1e-8")  # Changed default to 1e-8
+        self.flux_cutoff_edit.setText("1e-8")
         self.flux_cutoff_edit.setMaximumWidth(100)
         self.flux_cutoff_edit.editingFinished.connect(self.update_flux_cutoff_from_text)
         cutoff_row.addWidget(self.flux_cutoff_edit)
-        
-        # Add units label separately
+
         units_label = QLabel("particles/cm²/s")
         units_label.setStyleSheet("color: #ccc; font-size: 10px;")
         cutoff_row.addWidget(units_label)
         cutoff_row.addStretch()
         permanent_layout.addRow(cutoff_row)
-        
-        # Store the current flux cutoff value - CHANGED DEFAULT
+
         self.current_flux_cutoff = 1e-8
-        
-        # Color Scale toggle (permanent)
+
+        # Color Scale toggle (permanent) - keep horizontal layout
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("Color Scale:"))
         self.scale_mode_combo = QComboBox()
@@ -1958,8 +1994,8 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         scale_row.addWidget(self.scale_mode_combo)
         scale_row.addStretch()
         permanent_layout.addRow(scale_row)
-        
-        # Color map selection (permanent)
+
+        # Color map selection (permanent) - keep horizontal layout
         colormap_row = QHBoxLayout()
         colormap_row.addWidget(QLabel("Color Map:"))
         self.colormap_combo = QComboBox()
@@ -1975,20 +2011,45 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         colormap_row.addWidget(self.colormap_combo)
         colormap_row.addStretch()
         permanent_layout.addRow(colormap_row)
-        
+
         viz_layout.addLayout(permanent_layout)
-        
+
         # Add debug button
         debug_button = QPushButton("Debug Scalar Ranges")
         debug_button.clicked.connect(self.debug_scalar_ranges)
         viz_layout.addWidget(debug_button)
-        
+
         # Insert into main control layout
         if insert_index >= 0:
             control_layout.insertWidget(insert_index, viz_group)
         else:
             control_layout.addWidget(viz_group)
 
+    def test_dual_scale_mapping(self):
+        """Test method to verify dual-scale mapping is correct"""
+        print("=== TESTING DUAL-SCALE MAPPING ===")
+
+        test_values = [0, 25, 50, 75, 100]
+
+        for value in test_values:
+            if value <= 50:
+                percentile = 1 + (value / 50.0) * 89
+                expected_desc = f"broad range: 1st-90th"
+            else:
+                normalized = (value - 50) / 50.0
+                percentile = 90 + normalized * 9.9
+                expected_desc = f"high-res range: 90th-99.9th"
+
+            print(f"Slider {value}% -> {percentile:.1f}th percentile ({expected_desc})")
+
+        print("Expected behavior:")
+        print("  0% -> 1st percentile")
+        print(" 25% -> 45th percentile") 
+        print(" 50% -> 90th percentile (TRANSITION POINT)")
+        print(" 75% -> 95th percentile")
+        print("100% -> 99.9th percentile")
+        print("=== TEST COMPLETE ===")
+            
     def update_flux_cutoff_from_text(self):
         """Update flux cutoff - with better default"""
         try:
@@ -2041,15 +2102,53 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         return (effective_min, effective_max)
 
     def change_scale_mode(self, scale_mode):
-        """Change scale mode with debugging"""
+        """Change scale mode with debugging and volume rendering support"""
         print(f"\n=== CHANGING SCALE MODE TO: {scale_mode} ===")
-        
+
         # Add debugging
         self.debug_scalar_ranges()
-        
-        # Simply update the scale without regenerating geometry
-        if hasattr(self, 'vtk_data') and self.vtk_data:
-            self.update_current_visualization_scale()
+
+        try:
+            # Update regular field visualizations (existing logic)
+            if hasattr(self, 'vtk_data') and self.vtk_data:
+                self.update_current_visualization_scale()
+
+            # NEW: Update volume rendering if active
+            if (hasattr(self, 'volume_actor') and self.volume_actor and 
+                hasattr(self, 'viz_mode_combo') and 
+                self.viz_mode_combo.currentText() == "Volume Rendering"):
+
+                print(f"Updating volume rendering scale to: {scale_mode}")
+
+                # Get current threshold and reapply with new scale
+                if hasattr(self, 'volume_threshold_slider'):
+                    current_slider_value = self.volume_threshold_slider.value()
+                    print(f"Reapplying volume threshold with new scale: slider={current_slider_value}%")
+                    self.update_volume_threshold(current_slider_value)
+                else:
+                    print("Warning: volume_threshold_slider not found")
+
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+
+            print(f"Scale mode successfully changed to: {scale_mode}")
+            print(f"=== SCALE MODE CHANGE COMPLETE ===\n")
+
+        except Exception as e:
+            print(f"Error changing scale mode: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Try to recover by updating just the basic visualization
+            try:
+                if hasattr(self, 'vtk_data') and self.vtk_data:
+                    self.update_current_visualization_scale()
+                    if hasattr(self, 'vtk_widget'):
+                        self.vtk_widget.GetRenderWindow().Render()
+                print("Recovered with basic scale update")
+            except Exception as recovery_error:
+                print(f"Recovery also failed: {recovery_error}")
 
 
     def update_current_visualization_scale(self):
@@ -2233,39 +2332,58 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             return lut
 
     def get_colormap_color(self, colormap_name, t):
-        """Get RGB color for given colormap at position t (0-1)"""
+        """Get RGB color for given colormap at position t (0-1) - Enhanced version"""
         t = np.clip(t, 0, 1)
 
         if colormap_name == "Viridis":
             return self.get_viridis_color(t)
         elif colormap_name == "Plasma":
             return self.get_plasma_color(t)
+        elif colormap_name == "Cool to Warm":
+            # Cool (blue) to warm (red) transition
+            return [t, 0.3 + 0.4*t, 1.0 - t]
         elif colormap_name == "Grayscale":
             return [t, t, t]
         elif colormap_name == "Rainbow":
             # HSV rainbow
-            hue = (1.0 - t) * 0.667  # Blue to red
+            hue = (1.0 - t) * 0.75  # Blue to red through spectrum
             return self.hsv_to_rgb(hue, 1.0, 1.0)
-        else:  # Blue to Red or default
-            return [t, 0.5, 1.0 - t]
+        else:  # "Blue to Red" or default
+            return [t, 0.0, 1.0 - t]
 
     def get_viridis_color(self, t):
-        """Approximate viridis colormap"""
-        if t < 0.25:
-            r, g, b = 0.267004 + t*0.183371, 0.004874 + t*0.478894, 0.329415 + t*0.511095
-        elif t < 0.5:
-            t_norm = (t - 0.25) / 0.25
-            r, g, b = 0.127568 + t_norm*0.253935, 0.566949 + t_norm*0.214982, 0.550556 + t_norm*(-0.133721)
-        elif t < 0.75:
-            t_norm = (t - 0.5) / 0.25
-            r, g, b = 0.369214 + t_norm*0.304662, 0.788675 + t_norm*0.138379, 0.382914 + t_norm*(-0.224125)
+        """Improved viridis colormap approximation"""
+        # Better viridis approximation with more color points
+        if t < 0.2:
+            r = 0.267004 + t * 5 * (0.229739 - 0.267004)
+            g = 0.004874 + t * 5 * (0.322361 - 0.004874) 
+            b = 0.329415 + t * 5 * (0.545706 - 0.329415)
+        elif t < 0.4:
+            t_norm = (t - 0.2) * 5
+            r = 0.229739 + t_norm * (0.127568 - 0.229739)
+            g = 0.322361 + t_norm * (0.566949 - 0.322361)
+            b = 0.545706 + t_norm * (0.550556 - 0.545706)
+        elif t < 0.6:
+            t_norm = (t - 0.4) * 5
+            r = 0.127568 + t_norm * (0.369214 - 0.127568)
+            g = 0.566949 + t_norm * (0.788675 - 0.566949)
+            b = 0.550556 + t_norm * (0.382914 - 0.550556)
+        elif t < 0.8:
+            t_norm = (t - 0.6) * 5
+            r = 0.369214 + t_norm * (0.663765 - 0.369214)
+            g = 0.788675 + t_norm * (0.865006 - 0.788675)
+            b = 0.382914 + t_norm * (0.197275 - 0.382914)
         else:
-            t_norm = (t - 0.75) / 0.25
-            r, g, b = 0.663765 + t_norm*0.267004, 0.865006 + t_norm*0.104775, 0.197275 + t_norm*0.109709
+            t_norm = (t - 0.8) * 5
+            r = 0.663765 + t_norm * (0.993248 - 0.663765)
+            g = 0.865006 + t_norm * (0.909560 - 0.865006)
+            b = 0.197275 + t_norm * (0.143936 - 0.197275)
+
         return [r, g, b]
 
     def get_plasma_color(self, t):
-        """Approximate plasma colormap"""
+        """Improved plasma colormap approximation"""
+        # Better plasma approximation
         r = 0.050383 + t * (0.940015 - 0.050383)
         g = 0.029803 + t * t * (0.975158 - 0.029803)
         b = 0.527975 + t * (0.131326 - 0.527975)
@@ -2275,6 +2393,90 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         """Convert HSV to RGB"""
         import colorsys
         return list(colorsys.hsv_to_rgb(h, s, v))
+
+    def change_colormap(self, colormap_name):
+        """Change the color mapping with volume rendering support"""
+        print(f"\n=== CHANGING COLORMAP TO: {colormap_name} ===")
+
+        try:
+            # Get current scale mode
+            scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
+
+            # Get scalar range
+            scalar_range = getattr(self, 'current_scalar_range', 
+                                  self.vtk_data.GetScalarRange() if hasattr(self, 'vtk_data') and self.vtk_data else (0, 1))
+
+            # Create new lookup table with current scale mode for regular visualizations
+            new_lut = self.create_lookup_table_with_scale(colormap_name, scale_mode, scalar_range)
+
+            # Update regular field actors
+            if hasattr(self, 'field_actor') and self.field_actor:
+                mapper = self.field_actor.GetMapper()
+                if mapper:
+                    mapper.SetLookupTable(new_lut)
+                    print("Updated field_actor colormap")
+
+            # Update slice actors
+            if hasattr(self, 'slice_actors'):
+                for i, actor in enumerate(self.slice_actors):
+                    if actor:
+                        mapper = actor.GetMapper()
+                        if mapper:
+                            mapper.SetLookupTable(new_lut)
+                if hasattr(self, 'slice_actors') and self.slice_actors:
+                    print(f"Updated {len(self.slice_actors)} slice actors colormap")
+
+            # Update wireframe actors (if they use colormaps)
+            if hasattr(self, 'wireframe_actors'):
+                for actor in self.wireframe_actors:
+                    if actor:
+                        mapper = actor.GetMapper()
+                        if mapper and hasattr(mapper, 'GetLookupTable') and mapper.GetLookupTable():
+                            mapper.SetLookupTable(new_lut)
+
+            # NEW: Update volume rendering if active
+            if (hasattr(self, 'volume_actor') and self.volume_actor and 
+                hasattr(self, 'viz_mode_combo') and 
+                self.viz_mode_combo.currentText() == "Volume Rendering"):
+
+                print(f"Updating volume rendering colormap to: {colormap_name}")
+
+                # Get current threshold and reapply with new colormap
+                if hasattr(self, 'volume_threshold_slider'):
+                    current_slider_value = self.volume_threshold_slider.value()
+                    print(f"Reapplying volume threshold with new colormap: slider={current_slider_value}%")
+                    self.update_volume_threshold(current_slider_value)
+                else:
+                    print("Warning: volume_threshold_slider not found")
+
+            # Update volume rendering transfer functions for other modes too
+            if hasattr(self, 'volume_actor') and self.volume_actor:
+                self.update_volume_transfer_functions()
+
+            # Update scalar bar
+            if hasattr(self, 'scalar_bar') and self.scalar_bar:
+                self.scalar_bar.SetLookupTable(new_lut)
+                print("Updated scalar bar colormap")
+
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+
+            print(f"Colormap successfully changed to: {colormap_name} ({scale_mode} scale)")
+            print(f"=== COLORMAP CHANGE COMPLETE ===\n")
+
+        except Exception as e:
+            print(f"Error changing colormap: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Try basic recovery
+            try:
+                if hasattr(self, 'vtk_widget'):
+                    self.vtk_widget.GetRenderWindow().Render()
+                print("Attempted basic recovery render")
+            except:
+                print("Recovery render also failed")
 
     def update_volume_transfer_functions(self):
         """Update volume rendering transfer functions for log scale"""
@@ -2790,28 +2992,276 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         else:
             # For other modes, use existing threshold logic
             self.update_threshold()
+
+
+    def apply_volume_threshold(self, flux_threshold):
+        """Apply flux threshold with user-selected color mapping (clean version)"""
+        try:
+            if not hasattr(self, 'volume_actor') or not self.volume_actor:
+                return
+
+            volume_property = self.volume_actor.GetProperty()
+            scalar_range = self.volume_data.GetScalarRange()
+
+            # Get user preferences (no debug output)
+            colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red'
+            scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else 'Linear'
+
+            # Create transfer functions
+            color_func = self.create_volume_color_function(flux_threshold, scalar_range, colormap_name, scale_mode)
+            opacity_func = self.create_volume_opacity_function(flux_threshold, scalar_range)
+
+            # Apply the transfer functions
+            volume_property.SetColor(color_func)
+            volume_property.SetScalarOpacity(opacity_func)
+
+            # Only log significant threshold changes
+            if not hasattr(self, '_last_logged_threshold') or abs(flux_threshold - self._last_logged_threshold) > flux_threshold * 0.1:
+                print(f"Volume threshold updated: {flux_threshold:.1e} ({colormap_name}, {scale_mode})")
+                self._last_logged_threshold = flux_threshold
+
+        except Exception as e:
+            print(f"Error applying volume threshold: {e}")
+
+    def create_volume_opacity_function(self, flux_threshold, scalar_range):
+        """Create opacity function with fewer points to reduce texture size"""
+        try:
+            opacity_func = vtk.vtkPiecewiseFunction()
+
+            # KEY FIX: Use minimal opacity points to reduce texture requirements
+            opacity_func.AddPoint(scalar_range[0], 0.0)                      # Background invisible
+            opacity_func.AddPoint(flux_threshold * 0.999, 0.0)              # Just below threshold invisible
+            opacity_func.AddPoint(flux_threshold, 0.6)                      # At threshold suddenly visible
+            opacity_func.AddPoint(scalar_range[1], 0.9)                     # Maximum flux most opaque
+            # Removed intermediate points to reduce texture size
+
+            return opacity_func
+
+        except Exception as e:
+            print(f"Error creating volume opacity function: {e}")
+            # Minimal fallback
+            opacity_func = vtk.vtkPiecewiseFunction()
+            opacity_func.AddPoint(scalar_range[0], 0.0)
+            opacity_func.AddPoint(flux_threshold, 0.7)
+            opacity_func.AddPoint(scalar_range[1], 0.9)
+            return opacity_func
+
+    def create_volume_color_function(self, flux_threshold, scalar_range, colormap_name, scale_mode):
+        """Create color transfer function with reasonable number of points"""
+        try:
+            color_func = vtk.vtkColorTransferFunction()
+
+            # Everything below threshold = black (invisible)
+            color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.0)
+            color_func.AddRGBPoint(flux_threshold * 0.999, 0.0, 0.0, 0.0)
+
+            # Color range for visible data
+            color_range_min = flux_threshold
+            color_range_max = scalar_range[1]
+
+            # KEY FIX: Use fewer color points to reduce texture requirements
+            if scale_mode == "Logarithmic" and color_range_min > 0:
+                # Logarithmic color mapping with fewer points
+                log_min = np.log10(color_range_min)
+                log_max = np.log10(color_range_max)
+
+                num_points = 4  # Reduced from 8 to 4
+                for i in range(num_points):
+                    log_pos = log_min + i * (log_max - log_min) / (num_points - 1)
+                    flux_value = 10**log_pos
+                    color_position = i / (num_points - 1)
+                    rgb_color = self.get_colormap_color(colormap_name, color_position)
+                    color_func.AddRGBPoint(flux_value, rgb_color[0], rgb_color[1], rgb_color[2])
+            else:
+                # Linear color mapping with fewer points
+                num_points = 3  # Reduced from 6 to 3
+                for i in range(num_points):
+                    flux_value = color_range_min + i * (color_range_max - color_range_min) / (num_points - 1)
+                    color_position = i / (num_points - 1)
+                    rgb_color = self.get_colormap_color(colormap_name, color_position)
+                    color_func.AddRGBPoint(flux_value, rgb_color[0], rgb_color[1], rgb_color[2])
+
+            return color_func
+
+        except Exception as e:
+            print(f"Error creating volume color function: {e}")
+            # Simple fallback
+            color_func = vtk.vtkColorTransferFunction()
+            color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.0)
+            color_func.AddRGBPoint(flux_threshold, 0.0, 0.0, 1.0)
+            color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)
+            return color_func
+
+    def update_volume_threshold(self, value):
+        """Update volume threshold with dual-scale mapping (clean version)"""
+        if not (hasattr(self, 'volume_actor') and self.volume_actor and 
+                self.viz_mode_combo.currentText() == "Volume Rendering"):
+            return
+
+        try:
+            # Dual-scale mapping
+            if value <= 50:
+                # First half: 0-50% slider -> 1st-90th percentile (linear)
+                percentile = 1 + (value / 50.0) * 89
+                scale_region = "broad"
+            else:
+                # Second half: 50-100% slider -> 90th-99.9th percentile (linear)
+                normalized = (value - 50) / 50.0
+                percentile = 90 + normalized * 9.9
+                scale_region = "high-res"
+
+            # Calculate actual flux threshold from percentile
+            flux_threshold = self.calculate_flux_from_percentile(percentile)
+
+            # Update label with appropriate precision
+            if scale_region == "broad":
+                self.volume_threshold_label.setText(f"{percentile:.0f}th %ile ({flux_threshold:.1e})")
+            else:
+                self.volume_threshold_label.setText(f"{percentile:.1f}th %ile ({flux_threshold:.1e})")
+
+            # Apply the threshold to volume rendering
+            self.apply_volume_threshold(flux_threshold)
+
+            # Force render
+            self.vtk_widget.GetRenderWindow().Render()
+
+            # Minimal debug output (only for major changes)
+            if value % 25 == 0:  # Only at 0%, 25%, 50%, 75%, 100%
+                print(f"Volume threshold: {percentile:.1f}th percentile ({flux_threshold:.1e})")
+
+        except Exception as e:
+            print(f"Error updating volume threshold: {e}")
+
+    def calculate_flux_from_percentile(self, target_percentile):
+        """Calculate flux value for a given percentile (1-99th range)"""
+        try:
+            if not hasattr(self, 'volume_data') or not self.volume_data:
+                return 1e-6  # Fallback
+
+            scalar_array = self.volume_data.GetPointData().GetScalars()
+            if not scalar_array:
+                return 1e-6
+
+            # Convert to numpy for percentile calculation
+            import vtk.util.numpy_support as vtk_np
+            flux_values = vtk_np.vtk_to_numpy(scalar_array)
+
+            # Remove zeros/background for meaningful percentiles
+            non_zero_flux = flux_values[flux_values > 0]
+
+            if len(non_zero_flux) == 0:
+                print("No non-zero flux values found")
+                return flux_values.max() * 0.1
+
+            # Calculate the percentile directly
+            flux_threshold = np.percentile(non_zero_flux, target_percentile)
+
+            return flux_threshold
+
+        except Exception as e:
+            print(f"Error calculating flux from percentile: {e}")
+            return 1e-6
+
+    def calculate_extended_volume_percentiles(self):
+        """Calculate extended percentiles (10th, 25th, 50th, 75th, 90th, 95th, 99th) for smooth interpolation"""
+        try:
+            scalar_array = self.volume_data.GetPointData().GetScalars()
+            if not scalar_array:
+                return
+
+            import vtk.util.numpy_support as vtk_np
+            flux_values = vtk_np.vtk_to_numpy(scalar_array)
+
+            # Remove zeros/background
+            non_zero_flux = flux_values[flux_values > 0]
+
+            if len(non_zero_flux) == 0:
+                return
+
+            # Calculate key percentiles for smooth interpolation
+            percentiles_to_calc = [10, 25, 50, 75, 90, 95, 99]
+            flux_percentiles = np.percentile(non_zero_flux, percentiles_to_calc)
+
+            # Store as dictionary for easy lookup
+            self.flux_percentiles = dict(zip(percentiles_to_calc, flux_percentiles))
+
+            print(f"Extended flux percentiles calculated: {self.flux_percentiles}")
+
+        except Exception as e:
+            print(f"Error calculating extended percentiles: {e}")
+
+    def interpolate_flux_from_percentile(self, target_percentile):
+        """Interpolate flux value from percentile using stored percentile data"""
+        try:
+            if not hasattr(self, 'flux_percentiles'):
+                return self.flux_10th_percentile  # Fallback
+
+            percentile_keys = sorted(self.flux_percentiles.keys())
+
+            # Find the two percentiles that bracket our target
+            if target_percentile <= percentile_keys[0]:
+                return self.flux_percentiles[percentile_keys[0]]
+            elif target_percentile >= percentile_keys[-1]:
+                return self.flux_percentiles[percentile_keys[-1]]
+            else:
+                # Interpolate between two bracketing percentiles
+                for i in range(len(percentile_keys) - 1):
+                    lower_p = percentile_keys[i]
+                    upper_p = percentile_keys[i + 1]
+
+                    if lower_p <= target_percentile <= upper_p:
+                        # Linear interpolation
+                        lower_flux = self.flux_percentiles[lower_p]
+                        upper_flux = self.flux_percentiles[upper_p]
+
+                        fraction = (target_percentile - lower_p) / (upper_p - lower_p)
+                        interpolated_flux = lower_flux + fraction * (upper_flux - lower_flux)
+
+                        return interpolated_flux
+
+            # Fallback
+            return self.flux_10th_percentile
+
+        except Exception as e:
+            print(f"Error interpolating flux from percentile: {e}")
+            return self.flux_10th_percentile
             
     def change_visualization_mode(self, mode):
-        """Enhanced mode change with dynamic control visibility"""
+        """Enhanced mode change with volume threshold control visibility"""
+        print(f"=== CHANGING VISUALIZATION MODE TO: {mode} ===")
+
         # Show/hide relevant controls based on mode
         self.point_cloud_controls.setVisible(mode == "Point Cloud")
         self.wireframe_controls.setVisible(mode == "Wireframe")
         self.slice_controls.setVisible(mode == "Slice Planes")
-        
+        self.volume_controls.setVisible(mode == "Volume Rendering")  # NEW: Show volume controls
+
         # Show/hide sub-controls for wireframe
         if mode == "Wireframe":
             style = self.wireframe_style_combo.currentText()
             self.isosurface_controls.setVisible(style == "Single Isosurface")
-        
-        # Call the original visualization change
+
+        # Handle transparency slider behavior
+        if mode == "Volume Rendering":
+            # Disable transparency slider for volume rendering (we have dedicated threshold control)
+            self.opacity_slider.setEnabled(False)
+            self.opacity_label.setText("N/A (use threshold)")
+            print("Volume rendering: using dedicated threshold control")
+        else:
+            # Enable transparency slider for other modes
+            self.opacity_slider.setEnabled(True)
+            self.opacity_label.setText(f"{self.opacity_slider.value()}%")
+            print("Using normal transparency control")
+
+        # Don't proceed if no data loaded
         if not self.vtk_data:
             return
-        
-        print(f"=== CHANGING VISUALIZATION MODE TO: {mode} ===")
-        
+
         try:
+            # Clear existing visualization
             self.clear_field_visualization()
-            
+
+            # Apply the selected visualization mode
             if mode == "Volume Rendering":
                 self.setup_volume_rendering()
             elif mode == "Isosurfaces":
@@ -2826,14 +3276,40 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 self.setup_slice_planes()
             else:
                 self.setup_field_visualization()
-                
+
             self.vtk_widget.GetRenderWindow().Render()
             print(f"=== VISUALIZATION MODE CHANGED TO: {mode} ===")
-        
+
         except Exception as e:
             print(f"Error changing visualization mode: {e}")
-            self.setup_field_visualization()
+            self.setup_point_cloud_rendering()
             self.vtk_widget.GetRenderWindow().Render()
+
+    def update_volume_threshold_label(self):
+        """Update the transparency label to show threshold info for volume rendering"""
+        try:
+            if (hasattr(self, 'volume_actor') and self.volume_actor and 
+                self.viz_mode_combo.currentText() == "Volume Rendering"):
+
+                # Change label to show it's a threshold, not transparency
+                slider_value = self.opacity_slider.value()
+
+                if hasattr(self, 'flux_10th_percentile') and hasattr(self, 'flux_90th_percentile'):
+                    current_threshold = self.flux_10th_percentile + (slider_value / 100.0) * (
+                        self.flux_90th_percentile - self.flux_10th_percentile
+                    )
+
+                    # Update the label to show threshold info
+                    threshold_percentile = 10 + (slider_value / 100.0) * 80  # 10th to 90th percentile
+                    self.opacity_label.setText(f"{threshold_percentile:.0f}th %ile ({current_threshold:.1e})")
+                else:
+                    self.opacity_label.setText(f"{slider_value}% threshold")
+            else:
+                # Regular transparency label for other modes
+                self.opacity_label.setText(f"{self.opacity_slider.value()}%")
+
+        except Exception as e:
+            print(f"Error updating volume threshold label: {e}")
 
     def clear_field_visualization(self):
         """ENHANCED clearing to handle ALL visualization actors properly"""
@@ -2892,84 +3368,260 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         print("=== CLEAR COMPLETE ===")
 
     def setup_volume_rendering(self):
-        """Fixed volume rendering with better error handling"""
+        """Volume rendering setup with GPU-friendly texture sizes"""
         if not self.vtk_data:
             return
-            
+
         print("Setting up volume rendering...")
-        
+
         try:
-            # Check if we already have image data
+            # Safety check
+            num_points = self.vtk_data.GetNumberOfPoints()
+            if num_points > 500000:
+                reply = QMessageBox.question(
+                    self, "Large Dataset Warning", 
+                    f"Dataset has {num_points:,} points. Volume rendering may be slow.\n\nContinue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    self.viz_mode_combo.setCurrentText("Point Cloud")
+                    return
+
+            # Get or create volume data
             if isinstance(self.vtk_data, vtk.vtkImageData):
                 volume_data = self.vtk_data
-                print("Using existing image data")
             else:
-                # Convert to image data using resample filter
-                print("Converting to image data for volume rendering...")
-                
-                # Get bounds
-                bounds = self.vtk_data.GetBounds()
-                
-                # Create a reasonable grid resolution
-                spacing = [(bounds[1]-bounds[0])/30, (bounds[3]-bounds[2])/30, (bounds[5]-bounds[4])/30]
-                
-                # Resample to structured grid
-                resample = vtk.vtkResampleToImage()
-                resample.SetInputData(self.vtk_data)
-                resample.SetSamplingDimensions(30, 30, 30)  # Reduced for performance
-                resample.Update()
-                volume_data = resample.GetOutput()
-                
-                if volume_data.GetNumberOfPoints() == 0:
-                    print("Failed to create volume data")
-                    return
-                    
-            # Use CPU volume mapper for stability
-            volume_mapper = vtk.vtkFixedPointVolumeRayCastMapper()
+                volume_data = self.create_downsampled_volume_data()
+
+            if not volume_data or volume_data.GetNumberOfPoints() == 0:
+                print("Volume data creation failed, switching to point cloud")
+                self.setup_point_cloud_rendering()
+                return
+
+            # Store for threshold calculations
+            self.volume_data = volume_data
+
+            # Create volume mapper with GPU-friendly settings
+            try:
+                volume_mapper = vtk.vtkGPUVolumeRayCastMapper()
+                # KEY FIX: Set maximum texture size to something reasonable
+                volume_mapper.SetMaxMemoryInBytes(256 * 1024 * 1024)  # 256MB limit
+                volume_mapper.SetMaxMemoryFraction(0.5)  # Use max 50% of GPU memory
+            except:
+                volume_mapper = vtk.vtkFixedPointVolumeRayCastMapper()
+
             volume_mapper.SetInputData(volume_data)
-            volume_mapper.SetBlendModeToComposite()
-            
+
             # Volume properties
             volume_property = vtk.vtkVolumeProperty()
             volume_property.SetInterpolationTypeToLinear()
-            volume_property.ShadeOn()
-            
-            # Get scalar range
-            scalar_range = volume_data.GetScalarRange()
-            print(f"Volume scalar range: {scalar_range}")
-            
-            if scalar_range[1] > scalar_range[0]:
-                # Color transfer function
-                color_func = vtk.vtkColorTransferFunction()
-                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)
-                color_func.AddRGBPoint(scalar_range[1] * 0.25, 0.0, 0.0, 1.0)
-                color_func.AddRGBPoint(scalar_range[1] * 0.5, 0.0, 1.0, 0.0)
-                color_func.AddRGBPoint(scalar_range[1] * 0.75, 1.0, 1.0, 0.0)
-                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)
-                
-                # Opacity transfer function - make more transparent
-                opacity_func = vtk.vtkPiecewiseFunction()
-                opacity_func.AddPoint(scalar_range[0], 0.0)
-                opacity_func.AddPoint(scalar_range[1] * 0.1, 0.0)
-                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.05)
-                opacity_func.AddPoint(scalar_range[1] * 0.6, 0.1)
-                opacity_func.AddPoint(scalar_range[1], 0.2)
-                
-                volume_property.SetColor(color_func)
-                volume_property.SetScalarOpacity(opacity_func)
-                
-            # Create volume
+            volume_property.ShadeOff()
+
+            # Create and add volume
             self.volume_actor = vtk.vtkVolume()
             self.volume_actor.SetMapper(volume_mapper)
             self.volume_actor.SetProperty(volume_property)
-            
             self.renderer.AddVolume(self.volume_actor)
+
+            # Apply initial threshold
+            initial_value = self.volume_threshold_slider.value() if hasattr(self, 'volume_threshold_slider') else 50
+            self.update_volume_threshold(initial_value)
+
             print("Volume rendering setup complete")
-            
+
         except Exception as e:
-            print(f"Volume rendering failed: {e}")
-            # Fallback to point cloud
+            print(f"Volume rendering setup failed: {e}")
             self.setup_point_cloud_rendering()
+
+    def setup_threshold_volume_transfer_functions(self, slider_value):
+        """Setup volume transfer functions based on threshold slider (10th-90th percentile)"""
+        try:
+            if not hasattr(self, 'volume_actor') or not self.volume_actor:
+                return
+
+            volume_property = self.volume_actor.GetProperty()
+
+            # Map slider (0-100) to threshold range (10th-90th percentile)
+            threshold_flux = self.flux_10th_percentile + (slider_value / 100.0) * (
+                self.flux_90th_percentile - self.flux_10th_percentile
+            )
+
+            print(f"Volume threshold set to {threshold_flux:.2e} (slider: {slider_value}%)")
+
+            # Get full scalar range for transfer functions
+            scalar_range = self.volume_data.GetScalarRange()
+
+            # Color function - vibrant colors for visible regions
+            color_func = vtk.vtkColorTransferFunction()
+            color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.0)           # Background = black
+            color_func.AddRGBPoint(threshold_flux * 0.99, 0.0, 0.0, 0.0)    # Just below threshold = black
+            color_func.AddRGBPoint(threshold_flux, 0.0, 0.0, 1.0)           # At threshold = blue
+            color_func.AddRGBPoint(threshold_flux * 1.5, 0.0, 1.0, 1.0)     # Higher = cyan
+            color_func.AddRGBPoint(threshold_flux * 3.0, 0.0, 1.0, 0.0)     # Higher = green
+            color_func.AddRGBPoint(threshold_flux * 6.0, 1.0, 1.0, 0.0)     # Higher = yellow
+            color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)          # Maximum = red
+
+            # Opacity function - SHARP cutoff at threshold (no gradual fade)
+            opacity_func = vtk.vtkPiecewiseFunction()
+            opacity_func.AddPoint(scalar_range[0], 0.0)                      # Background = invisible
+            opacity_func.AddPoint(threshold_flux * 0.99, 0.0)               # Just below threshold = invisible
+            opacity_func.AddPoint(threshold_flux, 0.6)                      # At threshold = suddenly visible
+            opacity_func.AddPoint(threshold_flux * 2.0, 0.8)                # Higher flux = more opaque
+            opacity_func.AddPoint(scalar_range[1], 1.0)                     # Maximum flux = fully opaque
+
+            # Apply transfer functions
+            volume_property.SetColor(color_func)
+            volume_property.SetScalarOpacity(opacity_func)
+
+            print(f"Volume transfer functions updated with sharp threshold at {threshold_flux:.2e}")
+
+        except Exception as e:
+            print(f"Error setting up volume transfer functions: {e}")
+
+    def calculate_volume_percentiles(self, volume_data):
+        """Calculate flux percentiles for threshold mapping"""
+        try:
+            scalar_array = volume_data.GetPointData().GetScalars()
+            if not scalar_array:
+                print("No scalar data for percentile calculation")
+                return
+
+            # Convert to numpy for percentile calculation
+            import vtk.util.numpy_support as vtk_np
+            flux_values = vtk_np.vtk_to_numpy(scalar_array)
+
+            # Remove zeros/background for better percentile calculation
+            non_zero_flux = flux_values[flux_values > 0]
+
+            if len(non_zero_flux) == 0:
+                print("No non-zero flux values found")
+                self.flux_10th_percentile = flux_values.min()
+                self.flux_90th_percentile = flux_values.max()
+            else:
+                # Calculate 10th and 90th percentiles of actual flux
+                self.flux_10th_percentile = np.percentile(non_zero_flux, 10)
+                self.flux_90th_percentile = np.percentile(non_zero_flux, 90)
+
+            print(f"Flux percentiles: 10th={self.flux_10th_percentile:.2e}, 90th={self.flux_90th_percentile:.2e}")
+
+        except Exception as e:
+            print(f"Error calculating percentiles: {e}")
+            # Fallback to scalar range
+            scalar_range = volume_data.GetScalarRange()
+            self.flux_10th_percentile = scalar_range[0] + 0.1 * (scalar_range[1] - scalar_range[0])
+            self.flux_90th_percentile = scalar_range[0] + 0.9 * (scalar_range[1] - scalar_range[0])
+            
+    def create_downsampled_volume_data(self):
+        """Create heavily downsampled volume data for performance"""
+        try:
+            # Get bounds
+            bounds = self.vtk_data.GetBounds()
+
+            # AGGRESSIVE downsampling - max 30x30x30 = 27k points
+            max_dimension = 30
+
+            spacing = [
+                (bounds[1]-bounds[0]) / max_dimension,
+                (bounds[3]-bounds[2]) / max_dimension, 
+                (bounds[5]-bounds[4]) / max_dimension
+            ]
+
+            print(f"Downsampling to {max_dimension}³ = {max_dimension**3:,} points")
+            print(f"Spacing: {spacing[0]:.0f} x {spacing[1]:.0f} x {spacing[2]:.0f} km")
+
+            # Resample to structured grid
+            resample = vtk.vtkResampleToImage()
+            resample.SetInputData(self.vtk_data)
+            resample.SetSamplingDimensions(max_dimension, max_dimension, max_dimension)
+            resample.SetSamplingBounds(bounds)
+            resample.Update()
+
+            volume_data = resample.GetOutput()
+
+            if volume_data.GetNumberOfPoints() == 0:
+                print("Resampling failed")
+                return None
+
+            print(f"Volume data created: {volume_data.GetNumberOfPoints():,} points")
+            return volume_data
+
+        except Exception as e:
+            print(f"Error creating downsampled volume: {e}")
+            return None
+
+    def update_volume_transfer_functions(self):
+        """Update volume rendering transfer functions - OPTIMIZED VERSION"""
+        if not hasattr(self, 'volume_actor') or not self.volume_actor:
+            return
+
+        try:
+            volume_property = self.volume_actor.GetProperty()
+
+            # Get the volume data (might be downsampled)
+            volume_mapper = self.volume_actor.GetMapper()
+            volume_data = volume_mapper.GetInput()
+            scalar_range = volume_data.GetScalarRange()
+
+            scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
+
+            # Create MINIMAL transfer functions for speed
+            color_func = vtk.vtkColorTransferFunction()
+            opacity_func = vtk.vtkPiecewiseFunction()
+
+            if scale_mode == "Logarithmic" and scalar_range[1] > scalar_range[0] and scalar_range[0] > 0:
+                # Log scale - but keep it SIMPLE
+                log_min = np.log10(max(scalar_range[0], scalar_range[1] * 1e-6))
+                log_max = np.log10(scalar_range[1])
+
+                # Only 3 points for speed
+                for i in range(3):
+                    log_val = log_min + i * (log_max - log_min) / 2
+                    linear_val = 10**log_val
+                    t = i / 2.0
+
+                    # Simple color progression
+                    if t < 0.5:
+                        color = [0.0, t*2, 1.0]
+                    else:
+                        color = [(t-0.5)*2, 1.0, 1.0-(t-0.5)*2]
+
+                    color_func.AddRGBPoint(linear_val, color[0], color[1], color[2])
+
+                    # VERY low opacity for performance
+                    opacity = min(0.1, 0.01 + t * 0.09)
+                    opacity_func.AddPoint(linear_val, opacity)
+            else:
+                # Linear scale - MINIMAL points
+                color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.2)
+                color_func.AddRGBPoint(scalar_range[1] * 0.5, 0.0, 1.0, 0.0)
+                color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)
+
+                # VERY sparse and low opacity
+                opacity_func.AddPoint(scalar_range[0], 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.3, 0.0)
+                opacity_func.AddPoint(scalar_range[1] * 0.7, 0.05)
+                opacity_func.AddPoint(scalar_range[1], 0.1)
+
+            volume_property.SetColor(color_func)
+            volume_property.SetScalarOpacity(opacity_func)
+
+            # Force a render
+            self.vtk_widget.GetRenderWindow().Render()
+            print(f"Updated volume rendering to {scale_mode} scale (optimized)")
+
+        except Exception as e:
+            print(f"Error updating volume transfer functions: {e}")
+
+    def add_volume_performance_warning(self):
+        """Add a warning message for volume rendering"""
+        # This could be added to the UI setup to warn users
+        if hasattr(self, 'viz_mode_combo'):
+            # Find the combo box and add tooltip
+            self.viz_mode_combo.setToolTip(
+                "Volume Rendering: May be slow on large datasets.\n"
+                "Use Point Cloud or Isosurfaces for better performance."
+            )
 
     def setup_isosurface_rendering(self):
         """Fixed isosurface rendering"""
@@ -3278,66 +3930,227 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             import traceback
             traceback.print_exc()
 
-    def setup_simple_points(self):
-        """Fallback: simple point rendering without glyphs"""
-        print("Setting up simple point rendering...")
-        
-        try:
-            # Simple mapper without glyphs
-            point_mapper = vtk.vtkDataSetMapper()
-            point_mapper.SetInputData(self.vtk_data)
-            
-            scalar_range = self.vtk_data.GetScalarRange()
-            point_mapper.SetScalarRange(scalar_range)
-            
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
-            point_mapper.SetLookupTable(lut)
-            
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(point_mapper)
-            self.field_actor.GetProperty().SetPointSize(4.0)
-            self.field_actor.GetProperty().SetRenderPointsAsSpheres(True)
-            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-            
-            self.renderer.AddActor(self.field_actor)
-            print("Simple point rendering setup complete")
-            
-        except Exception as e:
-            print(f"Simple point rendering failed: {e}")
-
     def setup_wireframe_rendering(self):
         """Enhanced wireframe with user-controllable options"""
         if not self.vtk_data:
             return
-        
+
         print("Setting up enhanced wireframe rendering...")
-        
+
         try:
             scalar_array = self.vtk_data.GetPointData().GetScalars()
             if not scalar_array:
                 print("No scalar data for wireframe")
                 return
-            
+
             scalar_range = scalar_array.GetRange()
-        
+
             # Get current wireframe style
             style = getattr(self, 'wireframe_style_combo', None)
             if style:
                 current_style = style.currentText()
             else:
                 current_style = "Single Isosurface"
-                
+
             if current_style == "Single Isosurface":
                 self.create_controllable_single_isosurface(scalar_range)
             elif current_style == "Multiple Isosurface":
-                self.create_multiple_isosurface_wireframes(scalar_range)
+                # FIX: Connect to the existing method
+                self.create_isosurface_wireframes(scalar_range)
             else:  # Boundary Box
                 self.create_boundary_wireframe()
-            
+
             print("Enhanced wireframe rendering complete")
-        
+
         except Exception as e:
             print(f"Wireframe rendering failed: {e}")
+
+    def create_isosurface_wireframes(self, scalar_range):
+        """Create wireframe contours at different flux levels"""
+        if scalar_range[1] <= scalar_range[0]:
+            return
+
+        print("Creating multiple isosurface wireframes...")
+
+        # Initialize wireframe actors list if it doesn't exist
+        if not hasattr(self, 'wireframe_actors'):
+            self.wireframe_actors = []
+
+        # Create 4 isosurface levels in the meaningful range
+        min_val = scalar_range[1] * 0.2   # 20% of max
+        max_val = scalar_range[1] * 0.8   # 80% of max
+
+        if max_val > min_val:
+            num_levels = 4
+            levels = np.linspace(min_val, max_val, num_levels)
+
+            # Define distinct colors for each level (blue to red)
+            colors = [
+                [0.0, 0.0, 1.0],  # Blue (outermost, lowest)
+                [0.0, 0.7, 0.7],  # Cyan
+                [1.0, 0.7, 0.0],  # Orange  
+                [1.0, 0.0, 0.0]   # Red (innermost, highest)
+            ]
+
+            for i, level in enumerate(levels):
+                # Create contour
+                contour = vtk.vtkContourFilter()
+                contour.SetInputData(self.vtk_data)
+                contour.SetValue(0, level)
+                contour.Update()
+
+                contour_output = contour.GetOutput()
+
+                if contour_output.GetNumberOfPoints() > 0:
+                    # Extract edges to create wireframe
+                    edges = vtk.vtkExtractEdges()
+                    edges.SetInputData(contour_output)
+                    edges.Update()
+
+                    # Create mapper
+                    wireframe_mapper = vtk.vtkPolyDataMapper()
+                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
+
+                    # IMPORTANT: Turn OFF scalar visibility to use solid colors
+                    wireframe_mapper.ScalarVisibilityOff()
+
+                    # Create actor
+                    wireframe_actor = vtk.vtkActor()
+                    wireframe_actor.SetMapper(wireframe_mapper)
+
+                    # Set distinct color for this level
+                    color = colors[i] if i < len(colors) else [1.0, 1.0, 1.0]
+                    wireframe_actor.GetProperty().SetColor(color[0], color[1], color[2])
+                    wireframe_actor.GetProperty().SetLineWidth(2.5)
+                    wireframe_actor.GetProperty().SetOpacity(0.9)
+
+                    self.wireframe_actors.append(wireframe_actor)
+                    self.renderer.AddActor(wireframe_actor)
+
+                    print(f"  Level {i+1}: {level:.2e} (color: {color}) - {contour_output.GetNumberOfPoints()} points")
+
+            print(f"Created {len(levels)} nested isosurface wireframes with distinct colors")
+        else:
+            print("Invalid scalar range for multiple isosurfaces")
+
+    def create_boundary_wireframe(self):
+        """Create wireframe around the boundary of the dataset"""
+        if not self.vtk_data:
+            print("No VTK data for boundary wireframe")
+            return
+
+        print("Creating boundary wireframe...")
+
+        try:
+            # Simple and reliable approach: just create an outline of the data bounds
+            outline = vtk.vtkOutlineFilter()
+            outline.SetInputData(self.vtk_data)
+            outline.Update()
+
+            outline_output = outline.GetOutput()
+
+            if outline_output.GetNumberOfCells() == 0:
+                print("No outline generated, trying bounding box...")
+                self.create_bounding_box_wireframe()
+                return
+
+            # Create mapper
+            wireframe_mapper = vtk.vtkPolyDataMapper()
+            wireframe_mapper.SetInputConnection(outline.GetOutputPort())
+            wireframe_mapper.ScalarVisibilityOff()  # Use solid color
+
+            # Create actor
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(wireframe_mapper)
+
+            # Set appearance
+            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Bright yellow
+            self.field_actor.GetProperty().SetLineWidth(3.0)
+
+            # Apply transparency setting
+            opacity = self.opacity_slider.value() / 100.0 if hasattr(self, 'opacity_slider') else 0.8
+            self.field_actor.GetProperty().SetOpacity(opacity)
+
+            # Add to renderer
+            self.renderer.AddActor(self.field_actor)
+
+            # Get bounds for debug info
+            bounds = self.vtk_data.GetBounds()
+            print(f"Boundary wireframe created successfully")
+            print(f"Bounds: X({bounds[0]:.0f} to {bounds[1]:.0f}) Y({bounds[2]:.0f} to {bounds[3]:.0f}) Z({bounds[4]:.0f} to {bounds[5]:.0f})")
+
+        except Exception as e:
+            print(f"Error creating boundary wireframe: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Fallback: simple bounding box wireframe
+            print("Falling back to bounding box wireframe...")
+            self.create_bounding_box_wireframe()
+
+    def create_bounding_box_wireframe(self):
+        """Fallback: Create a simple bounding box wireframe"""
+        if not self.vtk_data:
+            return
+
+        try:
+            # Get data bounds
+            bounds = self.vtk_data.GetBounds()
+
+            # Create a simple cube outline
+            outline = vtk.vtkOutlineFilter()
+            outline.SetInputData(self.vtk_data)
+            outline.Update()
+
+            # Create mapper and actor
+            outline_mapper = vtk.vtkPolyDataMapper()
+            outline_mapper.SetInputConnection(outline.GetOutputPort())
+
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(outline_mapper)
+            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Yellow
+            self.field_actor.GetProperty().SetLineWidth(3.0)
+            self.field_actor.GetProperty().SetOpacity(0.8)
+
+            self.renderer.AddActor(self.field_actor)
+
+            print(f"Bounding box wireframe created")
+            print(f"Bounds: X({bounds[0]:.0f}, {bounds[1]:.0f}) Y({bounds[2]:.0f}, {bounds[3]:.0f}) Z({bounds[4]:.0f}, {bounds[5]:.0f})")
+
+        except Exception as e:
+            print(f"Error creating bounding box wireframe: {e}")
+
+    def create_bounding_box_wireframe(self):
+        """Fallback: Create a simple bounding box wireframe"""
+        if not self.vtk_data:
+            return
+
+        try:
+            # Get data bounds
+            bounds = self.vtk_data.GetBounds()
+
+            # Create a simple cube outline
+            outline = vtk.vtkOutlineFilter()
+            outline.SetInputData(self.vtk_data)
+            outline.Update()
+
+            # Create mapper and actor
+            outline_mapper = vtk.vtkPolyDataMapper()
+            outline_mapper.SetInputConnection(outline.GetOutputPort())
+
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(outline_mapper)
+            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Yellow
+            self.field_actor.GetProperty().SetLineWidth(3.0)
+            self.field_actor.GetProperty().SetOpacity(0.8)
+
+            self.renderer.AddActor(self.field_actor)
+
+            print(f"Bounding box wireframe created")
+            print(f"Bounds: X({bounds[0]:.0f}, {bounds[1]:.0f}) Y({bounds[2]:.0f}, {bounds[3]:.0f}) Z({bounds[4]:.0f}, {bounds[5]:.0f})")
+
+        except Exception as e:
+            print(f"Error creating bounding box wireframe: {e}")
 
     def create_controllable_single_isosurface(self, scalar_range):
         """Create isosurface with stored references for fast updates"""
@@ -3380,157 +4193,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Isosurface wireframe created: {contour_output.GetNumberOfPoints()} points")
         else:
             print("No contour generated at this level")
-
-    def create_isosurface_wireframes(self, scalar_range):
-        """Create wireframe contours at different flux levels"""
-        if scalar_range[1] <= scalar_range[0]:
-            return
-        
-        print("Creating isosurface wireframes...")
-    
-        # Create 3-4 isosurface levels in the meaningful range
-        min_val = scalar_range[1] * 0.2   # 20% of max
-        max_val = scalar_range[1] * 0.8   # 80% of max
-    
-        if max_val > min_val:
-            num_levels = 4
-            levels = np.linspace(min_val, max_val, num_levels)
-        
-            for i, level in enumerate(levels):
-                # Create contour
-                contour = vtk.vtkContourFilter()
-                contour.SetInputData(self.vtk_data)
-                contour.SetValue(0, level)
-                contour.Update()
-            
-                contour_output = contour.GetOutput()
-            
-                if contour_output.GetNumberOfPoints() > 0:
-                    # Extract edges to create wireframe
-                    edges = vtk.vtkExtractEdges()
-                    edges.SetInputData(contour_output)
-                    edges.Update()
-                
-                    # Create mapper
-                    wireframe_mapper = vtk.vtkPolyDataMapper()
-                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
-                
-                    # Create actor
-                    wireframe_actor = vtk.vtkActor()
-                    wireframe_actor.SetMapper(wireframe_mapper)
-                
-                    # Color by level (blue to red)
-                    intensity = i / (num_levels - 1)
-                    color = [intensity, 0.5, 1.0 - intensity]
-                    wireframe_actor.GetProperty().SetColor(color)
-                    wireframe_actor.GetProperty().SetLineWidth(2.0)
-                    wireframe_actor.GetProperty().SetOpacity(0.8)
-                
-                    self.wireframe_actors.append(wireframe_actor)
-                    self.renderer.AddActor(wireframe_actor)
-                
-                    print(f"  Level {i+1}: {level:.2e} ({contour_output.GetNumberOfPoints()} points)")
-
-    def create_slice_wireframes(self):
-        """Create wireframe on cross-sectional planes"""
-        if not self.vtk_data:
-            return
-        
-        print("Adding slice wireframes...")
-    
-        try:
-            # Get bounds for slice positioning
-            bounds = self.vtk_data.GetBounds()
-            center = [(bounds[1]+bounds[0])/2, (bounds[3]+bounds[2])/2, (bounds[5]+bounds[4])/2]
-        
-            # Create one slice plane through the center
-            plane = vtk.vtkPlane()
-            plane.SetOrigin(center)
-            plane.SetNormal(0, 0, 1)  # XY plane
-        
-            # Cut the data
-            cutter = vtk.vtkCutter()
-            cutter.SetInputData(self.vtk_data)
-            cutter.SetCutFunction(plane)
-            cutter.Update()
-        
-            slice_data = cutter.GetOutput()
-        
-            if slice_data.GetNumberOfPoints() > 0:
-                # Extract edges
-                edges = vtk.vtkExtractEdges()
-                edges.SetInputData(slice_data)
-                edges.Update()
-            
-                # Create mapper
-                slice_wireframe_mapper = vtk.vtkPolyDataMapper()
-                slice_wireframe_mapper.SetInputConnection(edges.GetOutputPort())
-                
-                # Setup color mapping
-                scalar_range = self.vtk_data.GetScalarRange()
-                slice_wireframe_mapper.SetScalarRange(scalar_range)
-            
-                lut = self.create_lookup_table(self.colormap_combo.currentText())
-                slice_wireframe_mapper.SetLookupTable(lut)
-            
-                # Create actor
-                slice_wireframe_actor = vtk.vtkActor()
-                slice_wireframe_actor.SetMapper(slice_wireframe_mapper)
-                slice_wireframe_actor.GetProperty().SetLineWidth(1.5)
-                slice_wireframe_actor.GetProperty().SetOpacity(0.6)
-            
-                self.wireframe_actors.append(slice_wireframe_actor)
-                self.renderer.AddActor(slice_wireframe_actor)
-            
-                print(f"  Added slice wireframe ({slice_data.GetNumberOfPoints()} points)")
-            
-        except Exception as e:
-            print(f"Error creating slice wireframes: {e}")
-
-    def create_simple_boundary_wireframe(self):
-        """Fallback: create simple boundary wireframe (your original approach)"""
-        print("Creating simple boundary wireframe...")
-    
-        try:
-            # This is your original approach - kept as fallback
-            if isinstance(self.vtk_data, vtk.vtkUnstructuredGrid):
-                edges = vtk.vtkExtractEdges()
-                edges.SetInputData(self.vtk_data)
-                edges.Update()
-                wireframe_data = edges.GetOutput()
-            else:
-                # For other types, extract surface then edges
-                surface = vtk.vtkDataSetSurfaceFilter()
-                surface.SetInputData(self.vtk_data)
-                surface.Update()
-                
-                edges = vtk.vtkExtractEdges()
-                edges.SetInputData(surface.GetOutput())
-                edges.Update()
-                wireframe_data = edges.GetOutput()
-                
-            print(f"Simple wireframe: {wireframe_data.GetNumberOfCells()} edges")
-        
-            # Create mapper
-            wireframe_mapper = vtk.vtkPolyDataMapper()
-            wireframe_mapper.SetInputData(wireframe_data)
-            
-            scalar_range = self.vtk_data.GetScalarRange()
-            wireframe_mapper.SetScalarRange(scalar_range)
-            
-            lut = self.create_lookup_table(self.colormap_combo.currentText())
-            wireframe_mapper.SetLookupTable(lut)
-            
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(wireframe_mapper)
-            self.field_actor.GetProperty().SetLineWidth(1.0)
-            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-            
-            self.renderer.AddActor(self.field_actor)
-            print("Simple boundary wireframe created")
-        
-        except Exception as e:
-            print(f"Simple boundary wireframe failed: {e}")
 
     def setup_surface_with_edges(self):
         """Fixed surface with edges rendering"""
@@ -3680,41 +4342,101 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         return self.create_lookup_table_with_scale(colormap_name, scale_mode, effective_range)
 
     def update_opacity(self, value):
-        """Update field visualization opacity - FIXED"""
-        opacity = value / 100.0
+        """Update opacity - volume rendering uses dedicated threshold control, so this only affects other modes"""
         self.opacity_label.setText(f"{value}%")
-        
+
+        # Skip volume rendering - it has its own dedicated threshold control
+        if (hasattr(self, 'volume_actor') and self.volume_actor and 
+            self.viz_mode_combo.currentText() == "Volume Rendering"):
+            return  # Do nothing for volume rendering
+
         try:
+            opacity = value / 100.0
+
+            # Handle regular actors
             if hasattr(self, 'field_actor') and self.field_actor:
                 self.field_actor.GetProperty().SetOpacity(opacity)
-                
-            if hasattr(self, 'volume_actor') and self.volume_actor:
-                # For volume rendering, update the opacity function
-                volume_property = self.volume_actor.GetProperty()
-                opacity_func = volume_property.GetScalarOpacity()
-                
-                # Scale the existing opacity function
-                if opacity_func:
-                    # Get current range
-                    range_val = opacity_func.GetRange()
-                    if range_val[1] > range_val[0]:
-                        # Create new scaled opacity function
-                        new_opacity = vtk.vtkPiecewiseFunction()
-                        for i in range(int(opacity_func.GetSize())):
-                            x = range_val[0] + i * (range_val[1] - range_val[0]) / (opacity_func.GetSize() - 1)
-                            y = opacity_func.GetValue(x) * opacity
-                            new_opacity.AddPoint(x, y)
-                        volume_property.SetScalarOpacity(new_opacity)
-                
+
+            # Handle other actors
             if hasattr(self, 'slice_actors'):
                 for actor in self.slice_actors:
                     if actor:
                         actor.GetProperty().SetOpacity(opacity)
-                        
+
             self.vtk_widget.GetRenderWindow().Render()
-            
+
         except Exception as e:
             print(f"Error updating opacity: {e}")
+
+    def scale_volume_opacity_smoothly(self, slider_opacity):
+        """Scale volume opacity smoothly without making blocks disappear"""
+        try:
+            if not hasattr(self, 'base_opacity_func') or not hasattr(self, 'volume_scalar_range'):
+                print("No base opacity function stored, recreating...")
+                # Fallback: recreate the smooth opacity function
+                self.recreate_smooth_volume_opacity(slider_opacity)
+                return
+
+            volume_property = self.volume_actor.GetProperty()
+            scalar_range = self.volume_scalar_range
+
+            # Create new opacity function by scaling the base function
+            new_opacity_func = vtk.vtkPiecewiseFunction()
+
+            # Always keep a minimum opacity to prevent blocks from disappearing
+            min_opacity = 0.02 * slider_opacity  # Minimum visibility scales with slider
+            max_opacity = 0.8 * slider_opacity   # Maximum visibility scales with slider
+
+            # Apply the scaled opacity curve
+            new_opacity_func.AddPoint(scalar_range[0], 0.0)                           # Background stays invisible
+            new_opacity_func.AddPoint(scalar_range[1] * 0.1, max(min_opacity, 0.01)) # Minimum for low flux
+            new_opacity_func.AddPoint(scalar_range[1] * 0.3, min_opacity * 2)        # Scale medium flux
+            new_opacity_func.AddPoint(scalar_range[1] * 0.6, min_opacity * 4)        # Scale higher flux  
+            new_opacity_func.AddPoint(scalar_range[1], max_opacity)                  # Scale max flux
+
+            # Apply the new opacity function
+            volume_property.SetScalarOpacity(new_opacity_func)
+
+            print(f"Volume opacity scaled smoothly: min={min_opacity:.3f}, max={max_opacity:.3f}")
+
+        except Exception as e:
+            print(f"Error scaling volume opacity: {e}")
+            # Fallback
+            self.recreate_smooth_volume_opacity(slider_opacity)
+
+    def recreate_smooth_volume_opacity(self, slider_opacity):
+        """Recreate smooth volume opacity from scratch if scaling fails"""
+        try:
+            if not hasattr(self, 'volume_actor') or not self.volume_actor:
+                return
+
+            volume_property = self.volume_actor.GetProperty()
+            volume_mapper = self.volume_actor.GetMapper()
+            volume_data = volume_mapper.GetInput()
+            scalar_range = volume_data.GetScalarRange()
+
+            # Create smooth opacity function
+            opacity_func = vtk.vtkPiecewiseFunction()
+
+            min_opacity = 0.02 * slider_opacity
+            max_opacity = 0.8 * slider_opacity
+
+            opacity_func.AddPoint(scalar_range[0], 0.0)
+            opacity_func.AddPoint(scalar_range[1] * 0.1, max(min_opacity, 0.01))
+            opacity_func.AddPoint(scalar_range[1] * 0.3, min_opacity * 2)
+            opacity_func.AddPoint(scalar_range[1] * 0.6, min_opacity * 4)
+            opacity_func.AddPoint(scalar_range[1], max_opacity)
+
+            volume_property.SetScalarOpacity(opacity_func)
+
+            # Store for future scaling
+            self.base_opacity_func = opacity_func
+            self.volume_scalar_range = scalar_range
+
+            print(f"Recreated smooth volume opacity: min={min_opacity:.3f}, max={max_opacity:.3f}")
+
+        except Exception as e:
+            print(f"Error recreating smooth volume opacity: {e}")
 
     def toggle_threshold(self, enabled):
         """Toggle threshold filtering - FIXED"""
