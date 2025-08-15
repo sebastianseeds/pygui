@@ -20,6 +20,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
+import matplotlib
+matplotlib.use('Qt5Agg')  # Set backend before importing pyplot
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 # VTK-Qt integration
 try:
     from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -159,26 +165,185 @@ class SlicePlotWindow(QMainWindow):
         self.vtk_widget.GetRenderWindow().Render()
 
 class SpectrumPlotWindow(QMainWindow):
-    """Window for energy spectrum plotting"""
+    """Window for energy spectrum plotting with real-time updates"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Energy Spectrum")
-        self.setGeometry(200, 200, 600, 400)
+        self.setWindowTitle("Energy Spectrum - Real-time")
+        self.setGeometry(200, 200, 700, 500)
         
-        # For now, just a placeholder - we'll add matplotlib later
+        # Reference to parent for data access
+        self.parent_app = parent
+        
+        # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
         layout = QVBoxLayout(central_widget)
-        self.status_label = QLabel("Energy spectrum visualization\n(Matplotlib integration coming soon)")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label)
         
-    def update_spectrum(self, energy_bins, spectrum_data):
-        """Update the energy spectrum plot"""
-        # Placeholder for matplotlib spectrum plotting
-        self.status_label.setText(f"Spectrum updated with {len(spectrum_data)} energy bins")
+        # Create matplotlib figure and canvas
+        self.figure = Figure(figsize=(8, 6))
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+        
+        # Create subplot
+        self.ax = self.figure.add_subplot(111)
+        
+        # Energy bins for electron spectrum (keV)
+        self.energy_bins = np.logspace(1, 4, 50)  # 10 keV to 10 MeV, 50 bins
+        self.energy_centers = (self.energy_bins[:-1] + self.energy_bins[1:]) / 2
+        
+        # Initialize plot
+        self.setup_plot()
+        
+        # Status info
+        self.info_label = QLabel("Spectrum updates in real-time during animation")
+        self.info_label.setStyleSheet("color: #666; font-size: 10px; padding: 5px;")
+        layout.addWidget(self.info_label)
+        
+        # Current spectrum data
+        self.current_spectrum = np.zeros_like(self.energy_centers)
+        
+    def setup_plot(self):
+        """Setup the spectrum plot with proper styling"""
+        self.ax.clear()
+        
+        # Create the spectrum line plot
+        self.spectrum_line, = self.ax.loglog(self.energy_centers, 
+                                           np.ones_like(self.energy_centers) * 1e-10, 
+                                           'b-', linewidth=2, label='Electron Flux')
+        
+        # Styling
+        self.ax.set_xlabel('Energy (keV)', fontsize=12, fontweight='bold')
+        self.ax.set_ylabel('Flux (particles/cm²/s/keV)', fontsize=12, fontweight='bold')
+        self.ax.set_title('Electron Energy Spectrum at Satellite Position', fontsize=14, fontweight='bold')
+        
+        # Set axis limits
+        self.ax.set_xlim(10, 10000)  # 10 keV to 10 MeV
+        self.ax.set_ylim(1e-2, 1e8)   # Reasonable flux range
+        
+        # Grid and legend
+        self.ax.grid(True, alpha=0.3)
+        self.ax.legend()
+        
+        # Tight layout
+        self.figure.tight_layout()
+        self.canvas.draw()
+        
+    def calculate_energy_spectrum(self, total_flux, altitude_km):
+        """Calculate realistic energy spectrum from total flux and altitude"""
+        try:
+            if total_flux <= 0:
+                return np.zeros_like(self.energy_centers)
+            
+            # Van Allen belt energy spectrum model
+            # Different spectral shapes for different regions
+            
+            if altitude_km < 1000:  # Low Earth orbit
+                # Harder spectrum, more high-energy particles
+                spectral_index = -2.5
+                e_char = 100  # keV
+            elif 1000 <= altitude_km < 5000:  # Inner Van Allen belt region
+                # Softer spectrum with exponential cutoff
+                spectral_index = -1.8
+                e_char = 200  # keV
+            elif 5000 <= altitude_km < 15000:  # Peak Van Allen belt
+                # Very hard spectrum, lots of relativistic electrons
+                spectral_index = -1.2
+                e_char = 500  # keV
+            else:  # Outer belt and beyond
+                # Soft spectrum
+                spectral_index = -3.0
+                e_char = 50   # keV
+            
+            # Calculate differential flux: dJ/dE = J0 * (E/E0)^spectral_index * exp(-E/E_char)
+            E0 = 100  # Reference energy in keV
+            
+            # Power law with exponential cutoff
+            differential_flux = (self.energy_centers / E0) ** spectral_index * np.exp(-self.energy_centers / e_char)
+            
+            # Normalize to match total flux
+            # Total flux ≈ integral of differential flux over energy
+            total_calculated = np.trapz(differential_flux, self.energy_centers)
+            if total_calculated > 0:
+                differential_flux *= (total_flux / total_calculated)
+            
+            # Add some realistic spectral features
+            # Electron cyclotron resonance enhancement around 100-300 keV
+            if 1000 <= altitude_km <= 10000:
+                resonance_energy = 200  # keV
+                resonance_width = 100   # keV
+                resonance_enhancement = 2.0 * np.exp(-((self.energy_centers - resonance_energy) / resonance_width)**2)
+                differential_flux *= (1 + 0.3 * resonance_enhancement)
+            
+            return np.maximum(differential_flux, 1e-10)  # Floor to avoid zeros
+            
+        except Exception as e:
+            print(f"Error calculating energy spectrum: {e}")
+            return np.ones_like(self.energy_centers) * 1e-6
+    
+    def update_spectrum_from_satellite_position(self):
+        """Update spectrum based on current satellite position"""
+        try:
+            if not self.parent_app:
+                return
+                
+            # Get current satellite position and flux
+            if (hasattr(self.parent_app, 'orbital_path') and 
+                self.parent_app.orbital_path and
+                0 <= self.parent_app.current_time_index < len(self.parent_app.orbital_path)):
+                
+                current_point = self.parent_app.orbital_path[self.parent_app.current_time_index]
+                
+                # Calculate altitude
+                distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
+                altitude_km = distance_from_earth - 6371  # Earth radius
+                
+                # Get total flux at this position
+                total_flux = self.parent_app.flux_analyzer.analyze_flux_at_point(current_point)
+                
+                # Calculate energy spectrum
+                self.current_spectrum = self.calculate_energy_spectrum(total_flux, altitude_km)
+                
+                # Update plot
+                self.spectrum_line.set_ydata(self.current_spectrum)
+                
+                # Update info
+                self.info_label.setText(
+                    f"Time: {current_point.time:.2f}h | Alt: {altitude_km:.1f}km | "
+                    f"Total Flux: {total_flux:.2e} particles/cm²/s"
+                )
+                
+                # Redraw
+                self.canvas.draw_idle()
+                
+            else:
+                # No satellite data
+                self.info_label.setText("No satellite position data available")
+                
+        except Exception as e:
+            print(f"Error updating spectrum: {e}")
+            self.info_label.setText(f"Error updating spectrum: {e}")
+    
+    def update_spectrum(self, energy_bins=None, spectrum_data=None):
+        """Legacy method for compatibility - redirects to satellite-based update"""
+        if energy_bins is not None and spectrum_data is not None:
+            # Direct spectrum data provided
+            try:
+                self.spectrum_line.set_xdata(energy_bins)
+                self.spectrum_line.set_ydata(spectrum_data)
+                self.ax.relim()
+                self.ax.autoscale_view()
+                self.canvas.draw_idle()
+                self.info_label.setText(f"Updated with {len(spectrum_data)} energy bins")
+            except:
+                pass
+        else:
+            # Use satellite position
+            self.update_spectrum_from_satellite_position()
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        event.accept()
 
 class FluxTimePlotWindow(QMainWindow):
     """Window for flux vs time plotting"""
@@ -6196,7 +6361,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.vtk_widget.GetRenderWindow().Render()
         
     def update_plots(self):
-        """Update all plot windows"""
+        """Update all plot windows with real-time satellite data"""
         if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
             return
             
@@ -6207,12 +6372,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.slice_window.update_slice(current_point.phi, self.vtk_data)
             self.slice_window.set_object_position(current_point.x, current_point.y, current_point.z)
             
-        # Update spectrum plot (placeholder)
+        # Update spectrum plot with real satellite data
         if self.spectrum_window:
-            # Generate mock spectrum data
-            energies = np.linspace(0.1, 5.0, 50)
-            spectrum = np.exp(-energies / 0.5) * (1 + 0.2 * np.sin(energies))
-            self.spectrum_window.update_spectrum(energies, spectrum)
+            self.spectrum_window.update_spectrum_from_satellite_position()
             
         # Update flux time plot
         if self.flux_time_window:
