@@ -1875,7 +1875,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.point_cloud_controls.setVisible(True)
         viz_layout.addWidget(self.point_cloud_controls)
 
-        # Wireframe Style Controls (existing pattern)
+        # Wireframe Style Controls (enhanced with color mapping)
         self.wireframe_controls = QWidget()
         wireframe_layout = QFormLayout(self.wireframe_controls)
 
@@ -1892,21 +1892,45 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         style_row.addWidget(self.wireframe_style_combo)
         wireframe_layout.addRow(style_row)
 
-        # Isosurface Level Slider (keep existing horizontal layout)
-        self.isosurface_controls = QWidget()
-        iso_layout = QFormLayout(self.isosurface_controls)
+        # Wireframe Color Mode Control (NEW)
+        color_mode_row = QHBoxLayout()
+        color_mode_row.addWidget(QLabel("Color Mode:"))
+        self.wireframe_color_mode_combo = QComboBox()
+        self.wireframe_color_mode_combo.addItems([
+            "Solid Color",
+            "Color by Flux Value"
+        ])
+        self.wireframe_color_mode_combo.setCurrentText("Color by Flux Value")
+        self.wireframe_color_mode_combo.currentTextChanged.connect(self.change_wireframe_color_mode)
+        color_mode_row.addWidget(self.wireframe_color_mode_combo)
+        wireframe_layout.addRow(color_mode_row)
 
-        iso_slider_row = QHBoxLayout()
-        iso_slider_row.addWidget(QLabel("Contour Level:"))
+        # Isosurface Level Slider (updated to match volume controls style)
+        self.isosurface_controls = QWidget()
+        iso_layout = QVBoxLayout(self.isosurface_controls)  # Changed from QFormLayout to QVBoxLayout
+
+        # Title for the control
+        iso_title = QLabel("Contour Level:")
+        iso_title.setStyleSheet("font-weight: bold;")
+        iso_layout.addWidget(iso_title)
+
+        # Slider gets full width (longer like volume threshold)
         self.isosurface_level_slider = QSlider(Qt.Orientation.Horizontal)
         self.isosurface_level_slider.setRange(10, 90)
         self.isosurface_level_slider.setValue(50)
         self.isosurface_level_slider.valueChanged.connect(self.update_isosurface_level)
-        self.isosurface_level_label = QLabel("50% of peak")
-        self.isosurface_level_label.setMinimumWidth(120)
-        iso_slider_row.addWidget(self.isosurface_level_slider)
-        iso_slider_row.addWidget(self.isosurface_level_label)
-        iso_layout.addRow(iso_slider_row)
+        self.isosurface_level_slider.setMinimumWidth(300)  # Same width as volume threshold
+        self.isosurface_level_slider.setToolTip("Adjust the contour level for isosurface wireframe")  # Added tooltip
+        iso_layout.addWidget(self.isosurface_level_slider)
+
+        # Label below the slider (centered like volume threshold) - CLARIFIED PERCENTILE
+        self.isosurface_level_label = QLabel("50th flux percentile")
+        self.isosurface_level_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
+        self.isosurface_level_label.setStyleSheet("color: #ddd; font-size: 11px; margin-top: 2px;")
+        iso_layout.addWidget(self.isosurface_level_label)
+
+        # Add some spacing
+        iso_layout.addSpacing(5)
 
         wireframe_layout.addRow(self.isosurface_controls)
         self.isosurface_controls.setVisible(False)  # Initially hidden
@@ -2025,6 +2049,17 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         else:
             control_layout.addWidget(viz_group)
 
+    def change_wireframe_color_mode(self, color_mode):
+        """Change wireframe color mode between solid color and flux-based coloring"""
+        print(f"Changing wireframe color mode to: {color_mode}")
+        
+        # Only update if we're in wireframe mode
+        if self.viz_mode_combo.currentText() == "Wireframe" and self.vtk_data:
+            # Clear and recreate wireframe with new color mode
+            self.clear_field_visualization()
+            self.setup_wireframe_rendering()
+            self.vtk_widget.GetRenderWindow().Render()
+            
     def test_dual_scale_mapping(self):
         """Test method to verify dual-scale mapping is correct"""
         print("=== TESTING DUAL-SCALE MAPPING ===")
@@ -2245,14 +2280,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 break
             
     def create_lookup_table_with_scale(self, colormap_name, scale_mode, scalar_range):
-        """Create lookup table - FIXED to handle zero values properly"""
+        """Create lookup table - FIXED to properly implement distinct colormaps"""
         lut = vtk.vtkLookupTable()
         lut.SetNumberOfTableValues(256)
         
         try:
             min_val, max_val = scalar_range
             
-            print(f"\n=== CREATING {scale_mode} LUT ===")
+            print(f"\n=== CREATING {scale_mode} LUT for {colormap_name} ===")
             print(f"Input range: {min_val:.2e} to {max_val:.2e}")
             
             # CRITICAL FIX: Handle zero minimum for logarithmic scale
@@ -2277,24 +2312,13 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             # Set range FIRST
             lut.SetRange(min_val, max_val)
             
-            # Set colormap (simplified and reliable)
-            if colormap_name == "Plasma":
-                lut.SetHueRange(0.75, 0.083)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.2, 0.95)
-            elif colormap_name == "Viridis":
-                lut.SetHueRange(0.583, 0.167)
-                lut.SetSaturationRange(0.8, 1.0)
-                lut.SetValueRange(0.2, 0.9)
-            else:  # Default Blue to Red
-                lut.SetHueRange(0.667, 0.0)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.3, 1.0)
+            # FIXED: Build colormap with proper color assignment (no HSV override)
+            for i in range(256):
+                t = i / 255.0  # 0 to 1
+                rgb_color = self.get_colormap_color(colormap_name, t)
+                lut.SetTableValue(i, rgb_color[0], rgb_color[1], rgb_color[2], 1.0)
             
-            # Build FIRST
-            lut.Build()
-            
-            # Set scale mode AFTER building
+            # Set scale mode AFTER building colors
             if scale_mode == "Logarithmic":
                 lut.SetScaleToLog10()
                 print("Applied logarithmic scaling")
@@ -2302,10 +2326,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 lut.SetScaleToLinear()
                 print("Applied linear scaling")
             
-            # Rebuild after scale change
-            lut.Build()
-            
-            # Test the LUT - FIXED method call
+            # Test the LUT
             test_val = (min_val + max_val) / 2
             test_color = [0, 0, 0]
             lut.GetColor(test_val, test_color)
@@ -2314,9 +2335,8 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             if any(np.isnan(test_color)):
                 print("WARNING: NaN in colors, forcing linear")
                 lut.SetScaleToLinear()
-                lut.Build()
             
-            print(f"=== LUT CREATION COMPLETE ===\n")
+            print(f"=== {colormap_name} LUT CREATION COMPLETE ===\n")
             return lut
             
         except Exception as e:
@@ -2326,13 +2346,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             
             # Emergency fallback
             lut.SetRange(1e-5, 1e7)
-            lut.SetHueRange(0.667, 0.0)
+            for i in range(256):
+                t = i / 255.0
+                lut.SetTableValue(i, t, 0.0, 1.0-t, 1.0)  # Simple blue to red
             lut.SetScaleToLinear()
-            lut.Build()
             return lut
 
     def get_colormap_color(self, colormap_name, t):
-        """Get RGB color for given colormap at position t (0-1) - Enhanced version"""
+        """Get RGB color for given colormap at position t (0-1) - FIXED distinct colormaps"""
         t = np.clip(t, 0, 1)
 
         if colormap_name == "Viridis":
@@ -2340,54 +2361,92 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         elif colormap_name == "Plasma":
             return self.get_plasma_color(t)
         elif colormap_name == "Cool to Warm":
-            # Cool (blue) to warm (red) transition
-            return [t, 0.3 + 0.4*t, 1.0 - t]
+            # FIXED: Distinct cool to warm colormap (blue -> white -> red)
+            if t < 0.5:
+                # Blue to white
+                factor = t * 2
+                return [factor, factor, 1.0]
+            else:
+                # White to red
+                factor = (t - 0.5) * 2
+                return [1.0, 1.0 - factor, 1.0 - factor]
         elif colormap_name == "Grayscale":
+            # FIXED: True grayscale
             return [t, t, t]
         elif colormap_name == "Rainbow":
-            # HSV rainbow
-            hue = (1.0 - t) * 0.75  # Blue to red through spectrum
-            return self.hsv_to_rgb(hue, 1.0, 1.0)
+            # FIXED: True rainbow using HSV conversion
+            return self.get_rainbow_color(t)
         else:  # "Blue to Red" or default
+            # FIXED: Simple blue to red transition
             return [t, 0.0, 1.0 - t]
 
+    def get_rainbow_color(self, t):
+        """Get rainbow color using proper HSV to RGB conversion"""
+        # Map t to hue (0 = red, 0.17 = yellow, 0.33 = green, 0.5 = cyan, 0.67 = blue, 0.83 = magenta, 1 = red)
+        hue = (1.0 - t) * 0.83  # Reverse so red is high values
+        saturation = 1.0
+        value = 1.0
+        
+        # HSV to RGB conversion
+        import colorsys
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+        return list(rgb)
+        
     def get_viridis_color(self, t):
         """Improved viridis colormap approximation"""
-        # Better viridis approximation with more color points
-        if t < 0.2:
-            r = 0.267004 + t * 5 * (0.229739 - 0.267004)
-            g = 0.004874 + t * 5 * (0.322361 - 0.004874) 
-            b = 0.329415 + t * 5 * (0.545706 - 0.329415)
-        elif t < 0.4:
-            t_norm = (t - 0.2) * 5
-            r = 0.229739 + t_norm * (0.127568 - 0.229739)
-            g = 0.322361 + t_norm * (0.566949 - 0.322361)
-            b = 0.545706 + t_norm * (0.550556 - 0.545706)
-        elif t < 0.6:
-            t_norm = (t - 0.4) * 5
-            r = 0.127568 + t_norm * (0.369214 - 0.127568)
-            g = 0.566949 + t_norm * (0.788675 - 0.566949)
-            b = 0.550556 + t_norm * (0.382914 - 0.550556)
-        elif t < 0.8:
-            t_norm = (t - 0.6) * 5
-            r = 0.369214 + t_norm * (0.663765 - 0.369214)
-            g = 0.788675 + t_norm * (0.865006 - 0.788675)
-            b = 0.382914 + t_norm * (0.197275 - 0.382914)
-        else:
-            t_norm = (t - 0.8) * 5
-            r = 0.663765 + t_norm * (0.993248 - 0.663765)
-            g = 0.865006 + t_norm * (0.909560 - 0.865006)
-            b = 0.197275 + t_norm * (0.143936 - 0.197275)
-
-        return [r, g, b]
+        # High-quality viridis approximation using key points
+        viridis_points = [
+            (0.0, [0.267004, 0.004874, 0.329415]),
+            (0.25, [0.229739, 0.322361, 0.545706]),
+            (0.5, [0.127568, 0.566949, 0.550556]),
+            (0.75, [0.369214, 0.788675, 0.382914]),
+            (1.0, [0.993248, 0.909560, 0.143936])
+        ]
+        
+        # Find the two points to interpolate between
+        for i in range(len(viridis_points) - 1):
+            t1, color1 = viridis_points[i]
+            t2, color2 = viridis_points[i + 1]
+            
+            if t1 <= t <= t2:
+                # Linear interpolation
+                factor = (t - t1) / (t2 - t1)
+                return [
+                    color1[0] + factor * (color2[0] - color1[0]),
+                    color1[1] + factor * (color2[1] - color1[1]),
+                    color1[2] + factor * (color2[2] - color1[2])
+                ]
+        
+        # Fallback (shouldn't happen)
+        return [t, t, t]
 
     def get_plasma_color(self, t):
         """Improved plasma colormap approximation"""
-        # Better plasma approximation
-        r = 0.050383 + t * (0.940015 - 0.050383)
-        g = 0.029803 + t * t * (0.975158 - 0.029803)
-        b = 0.527975 + t * (0.131326 - 0.527975)
-        return [r, g, b]
+        # High-quality plasma approximation using key points
+        plasma_points = [
+            (0.0, [0.050383, 0.029803, 0.527975]),
+            (0.25, [0.513094, 0.038756, 0.627828]),
+            (0.5, [0.796386, 0.278894, 0.469397]),
+            (0.75, [0.940015, 0.644680, 0.222675]),
+            (1.0, [0.940015, 0.975158, 0.131326])
+        ]
+        
+        # Find the two points to interpolate between
+        for i in range(len(plasma_points) - 1):
+            t1, color1 = plasma_points[i]
+            t2, color2 = plasma_points[i + 1]
+            
+            if t1 <= t <= t2:
+                # Linear interpolation
+                factor = (t - t1) / (t2 - t1)
+                return [
+                    color1[0] + factor * (color2[0] - color1[0]),
+                    color1[1] + factor * (color2[1] - color1[1]),
+                    color1[2] + factor * (color2[2] - color1[2])
+                ]
+        
+        # Fallback
+        return [t, 0, 1-t]
 
     def hsv_to_rgb(self, h, s, v):
         """Convert HSV to RGB"""
@@ -2615,14 +2674,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.vtk_widget.GetRenderWindow().Render()
 
     def update_isosurface_level(self, level_percent):
-        """COMPACT: Update isosurface level with concise labeling"""
-        # Shorter, more concise label
+        """COMPACT: Update isosurface level with percentile clarification"""
+        # Update label to clearly indicate it's a flux percentile
         if hasattr(self, 'vtk_data') and self.vtk_data:
             scalar_range = self.vtk_data.GetScalarRange()
             actual_value = scalar_range[1] * (level_percent / 100.0)
-            self.isosurface_level_label.setText(f"{level_percent}% ({actual_value:.1e})")
+            self.isosurface_level_label.setText(f"{level_percent}th flux percentile ({actual_value:.1e})")
         else:
-            self.isosurface_level_label.setText(f"{level_percent}% of peak")
+            self.isosurface_level_label.setText(f"{level_percent}th flux percentile")
         
         # Only update if we're in the right mode
         if not (self.viz_mode_combo.currentText() == "Wireframe" and 
@@ -3931,11 +3990,11 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             traceback.print_exc()
 
     def setup_wireframe_rendering(self):
-        """Enhanced wireframe with user-controllable options"""
+        """Enhanced wireframe with user-controllable options and color mapping"""
         if not self.vtk_data:
             return
 
-        print("Setting up enhanced wireframe rendering...")
+        print("Setting up enhanced wireframe rendering with color mapping...")
 
         try:
             scalar_array = self.vtk_data.GetPointData().GetScalars()
@@ -3952,18 +4011,176 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             else:
                 current_style = "Single Isosurface"
 
+            # Get current color mode
+            color_mode = getattr(self, 'wireframe_color_mode_combo', None)
+            if color_mode:
+                current_color_mode = color_mode.currentText()
+            else:
+                current_color_mode = "Color by Flux Value"
+
             if current_style == "Single Isosurface":
-                self.create_controllable_single_isosurface(scalar_range)
+                self.create_controllable_single_isosurface_with_color(scalar_range, current_color_mode)
             elif current_style == "Multiple Isosurface":
-                # FIX: Connect to the existing method
-                self.create_isosurface_wireframes(scalar_range)
+                self.create_isosurface_wireframes_with_color(scalar_range, current_color_mode)
             else:  # Boundary Box
                 self.create_boundary_wireframe()
 
-            print("Enhanced wireframe rendering complete")
+            print("Enhanced wireframe rendering with color mapping complete")
 
         except Exception as e:
             print(f"Wireframe rendering failed: {e}")
+
+    def create_controllable_single_isosurface_with_color(self, scalar_range, color_mode):
+        """Create isosurface with color mapping support"""
+        if scalar_range[1] <= scalar_range[0]:
+            return
+            
+        level_percent = getattr(self, 'isosurface_level_slider', None)
+        if level_percent:
+            percent = level_percent.value() / 100.0
+        else:
+            percent = 0.5
+            
+        contour_level = scalar_range[1] * percent
+        print(f"Creating isosurface wireframe at {percent*100:.0f}% ({contour_level:.2e}) with {color_mode}")
+        
+        # Create contour filter
+        self.current_contour_filter = vtk.vtkContourFilter()
+        self.current_contour_filter.SetInputData(self.vtk_data)
+        self.current_contour_filter.SetValue(0, contour_level)
+        self.current_contour_filter.Update()
+        
+        contour_output = self.current_contour_filter.GetOutput()
+        
+        if contour_output.GetNumberOfPoints() > 0:
+            # Create edges filter
+            self.current_edges_filter = vtk.vtkExtractEdges()
+            self.current_edges_filter.SetInputConnection(self.current_contour_filter.GetOutputPort())
+            self.current_edges_filter.Update()
+            
+            wireframe_mapper = vtk.vtkPolyDataMapper()
+            wireframe_mapper.SetInputConnection(self.current_edges_filter.GetOutputPort())
+            
+            # Apply color mode
+            if color_mode == "Color by Flux Value":
+                # Enable scalar coloring
+                wireframe_mapper.ScalarVisibilityOn()
+                wireframe_mapper.SetScalarRange(scalar_range)
+                
+                # Create and apply lookup table
+                lut = self.create_lookup_table(self.colormap_combo.currentText())
+                wireframe_mapper.SetLookupTable(lut)
+                
+                # Setup scalar bar
+                scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
+                self.setup_scalar_bar(lut, scalar_name)
+                
+                print("Applied flux-based coloring to wireframe")
+            else:
+                # Use solid color
+                wireframe_mapper.ScalarVisibilityOff()
+                print("Applied solid color to wireframe")
+            
+            self.field_actor = vtk.vtkActor()
+            self.field_actor.SetMapper(wireframe_mapper)
+            
+            if color_mode == "Solid Color":
+                self.field_actor.GetProperty().SetColor(0.9, 0.9, 0.2)  # Yellow
+                
+            self.field_actor.GetProperty().SetLineWidth(2.0)
+            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
+            
+            self.renderer.AddActor(self.field_actor)
+            print(f"Isosurface wireframe created: {contour_output.GetNumberOfPoints()} points with {color_mode}")
+        else:
+            print("No contour generated at this level")
+
+    def create_isosurface_wireframes_with_color(self, scalar_range, color_mode):
+        """Create multiple wireframe contours with color mapping support"""
+        if scalar_range[1] <= scalar_range[0]:
+            return
+
+        print(f"Creating multiple isosurface wireframes with {color_mode}...")
+
+        # Initialize wireframe actors list if it doesn't exist
+        if not hasattr(self, 'wireframe_actors'):
+            self.wireframe_actors = []
+
+        # Create 4 isosurface levels in the meaningful range
+        min_val = scalar_range[1] * 0.2   # 20% of max
+        max_val = scalar_range[1] * 0.8   # 80% of max
+
+        if max_val > min_val:
+            num_levels = 4
+            levels = np.linspace(min_val, max_val, num_levels)
+
+            # Define distinct colors for solid color mode
+            solid_colors = [
+                [0.0, 0.0, 1.0],  # Blue (outermost, lowest)
+                [0.0, 0.7, 0.7],  # Cyan
+                [1.0, 0.7, 0.0],  # Orange  
+                [1.0, 0.0, 0.0]   # Red (innermost, highest)
+            ]
+
+            for i, level in enumerate(levels):
+                # Create contour
+                contour = vtk.vtkContourFilter()
+                contour.SetInputData(self.vtk_data)
+                contour.SetValue(0, level)
+                contour.Update()
+
+                contour_output = contour.GetOutput()
+
+                if contour_output.GetNumberOfPoints() > 0:
+                    # Extract edges to create wireframe
+                    edges = vtk.vtkExtractEdges()
+                    edges.SetInputData(contour_output)
+                    edges.Update()
+
+                    # Create mapper
+                    wireframe_mapper = vtk.vtkPolyDataMapper()
+                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
+
+                    # Apply color mode
+                    if color_mode == "Color by Flux Value":
+                        # Enable scalar coloring
+                        wireframe_mapper.ScalarVisibilityOn()
+                        wireframe_mapper.SetScalarRange(scalar_range)
+                        
+                        # Create and apply lookup table
+                        lut = self.create_lookup_table(self.colormap_combo.currentText())
+                        wireframe_mapper.SetLookupTable(lut)
+                        
+                        # Setup scalar bar (only once)
+                        if i == 0:
+                            scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
+                            self.setup_scalar_bar(lut, scalar_name)
+                    else:
+                        # Use distinct solid colors
+                        wireframe_mapper.ScalarVisibilityOff()
+
+                    # Create actor
+                    wireframe_actor = vtk.vtkActor()
+                    wireframe_actor.SetMapper(wireframe_mapper)
+
+                    if color_mode == "Solid Color":
+                        # Set distinct color for this level
+                        color = solid_colors[i] if i < len(solid_colors) else [1.0, 1.0, 1.0]
+                        wireframe_actor.GetProperty().SetColor(color[0], color[1], color[2])
+
+                    wireframe_actor.GetProperty().SetLineWidth(2.5)
+                    wireframe_actor.GetProperty().SetOpacity(0.9)
+
+                    self.wireframe_actors.append(wireframe_actor)
+                    self.renderer.AddActor(wireframe_actor)
+
+                    color_desc = f"color: {solid_colors[i]}" if color_mode == "Solid Color" else "flux-colored"
+                    print(f"  Level {i+1}: {level:.2e} ({color_desc}) - {contour_output.GetNumberOfPoints()} points")
+
+            color_mode_desc = "flux-based coloring" if color_mode == "Color by Flux Value" else "distinct solid colors"
+            print(f"Created {len(levels)} nested isosurface wireframes with {color_mode_desc}")
+        else:
+            print("Invalid scalar range for multiple isosurfaces")
 
     def create_isosurface_wireframes(self, scalar_range):
         """Create wireframe contours at different flux levels"""
