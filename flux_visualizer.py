@@ -216,7 +216,10 @@ class ElectronFluxVisualizer(QMainWindow):
     """Main application window"""
     
     def __init__(self):
+        """Constructor - FIXED timer initialization"""
         super().__init__()
+        print("DEBUG: ElectronFluxVisualizer.__init__() called")
+        
         self.setWindowTitle("Electron Flux Orbital Visualizer")
         self.setGeometry(100, 100, 1200, 800)
         
@@ -234,16 +237,23 @@ class ElectronFluxVisualizer(QMainWindow):
         self.spectrum_window = None
         self.flux_time_window = None
         
-        # Animation timer
-        self.animation_timer = QTimer()
-        self.animation_timer.timeout.connect(self.animation_step)
+        # Animation timer - FIXED initialization
+        print("DEBUG: Creating animation timer...")
+        self.animation_timer = QTimer(self)  # CRITICAL: Pass parent
+        print(f"DEBUG: Animation timer created with parent: {self.animation_timer.parent()}")
         
+        # IMMEDIATELY connect the timer signal
+        print("DEBUG: Connecting timer signal...")
+        self.animation_timer.timeout.connect(self.animation_step)
+        print("DEBUG: Timer signal connected to animation_step")
+        
+        # Set up UI and VTK
         self.setup_ui()
         self.setup_vtk()
-
         self.setup_visualization_controls()
-
         self.add_debug_button_to_controls()
+        
+        print("DEBUG: ElectronFluxVisualizer.__init__() completed")
 
     def debug_renderer_state(self):
         """Debug method to check renderer state"""
@@ -913,11 +923,11 @@ class ElectronFluxVisualizer(QMainWindow):
             return False
 
     def create_earth_opacity_control(self, parent_layout):
-        """Create Earth opacity control with lat/long grid checkbox on the right"""
+        """Create Earth opacity control with lat/long grid and hide orbital paths checkboxes"""
         try:
             # Create opacity control widget
             opacity_widget = QWidget()
-            opacity_layout = QHBoxLayout(opacity_widget)  # Back to HBox for single row
+            opacity_layout = QHBoxLayout(opacity_widget)  # Horizontal layout for single row
             opacity_layout.setContentsMargins(10, 5, 10, 5)
             opacity_layout.setSpacing(10)
             
@@ -939,15 +949,25 @@ class ElectronFluxVisualizer(QMainWindow):
             self.earth_opacity_value_label.setStyleSheet("color: white; font-weight: bold; min-width: 35px;")
             opacity_layout.addWidget(self.earth_opacity_value_label)
             
-            # Add some space between opacity and checkbox
+            # Add some space between opacity and checkboxes
             opacity_layout.addSpacing(15)
             
-            # Add checkbox for lat/long grid (to the right of slider)
+            # Add checkbox for lat/long grid
             self.show_latlong_grid = QCheckBox("Show Lat/Long Grid")
             self.show_latlong_grid.setChecked(False)  # Default unchecked
             self.show_latlong_grid.setStyleSheet("color: white; font-weight: bold;")
             self.show_latlong_grid.stateChanged.connect(self.toggle_latlong_grid)
             opacity_layout.addWidget(self.show_latlong_grid)
+            
+            # Add some space between checkboxes
+            opacity_layout.addSpacing(10)
+            
+            # Add checkbox for hiding orbital paths (NEW)
+            self.hide_orbital_paths = QCheckBox("Hide Orbital Paths")
+            self.hide_orbital_paths.setChecked(False)  # Default unchecked (paths visible)
+            self.hide_orbital_paths.setStyleSheet("color: white; font-weight: bold;")
+            self.hide_orbital_paths.stateChanged.connect(self.toggle_orbital_paths)
+            opacity_layout.addWidget(self.hide_orbital_paths)
             
             # Add final spacer to push everything left
             opacity_layout.addStretch()
@@ -992,15 +1012,48 @@ class ElectronFluxVisualizer(QMainWindow):
                 }
             """)
             
-            opacity_widget.setFixedHeight(35)  # Back to single row height
+            opacity_widget.setFixedHeight(35)  # Single row height
             
             # Add to parent layout
             parent_layout.addWidget(opacity_widget)
             
-            print("Earth opacity control with lat/long grid checkbox created successfully")
+            print("Earth opacity control with lat/long grid and hide orbital paths checkboxes created successfully")
             
         except Exception as e:
             print(f"Error creating Earth opacity control: {e}")
+
+    def toggle_orbital_paths(self, state):
+        """Toggle orbital path visibility"""
+        try:
+            hide_paths = state == 2  # Qt.Checked = 2
+            show_paths = not hide_paths
+            
+            print(f"Toggling orbital paths: {'HIDDEN' if hide_paths else 'VISIBLE'}")
+            
+            # Toggle main orbital path
+            if hasattr(self, 'path_actor') and self.path_actor:
+                self.path_actor.SetVisibility(show_paths)
+                print(f"Main orbital path visibility: {show_paths}")
+            
+            # Toggle satellite trail (keep visible even when hiding main path)
+            # The trail shows recent movement which is still useful
+            if hasattr(self, 'trail_actor') and self.trail_actor:
+                # Trail stays visible - it's different from the full orbital path
+                self.trail_actor.SetVisibility(True)
+                print("Satellite trail remains visible")
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+                
+            status = "hidden" if hide_paths else "visible"
+            print(f"Orbital paths are now {status}")
+                
+        except Exception as e:
+            print(f"Error toggling orbital paths: {e}")
+            import traceback
+            traceback.print_exc()
+
 
     def toggle_latlong_grid(self, state):
         """Toggle lat/long grid and labels visibility"""
@@ -2187,7 +2240,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
 
 
     def update_current_visualization_scale(self):
-        """Update the color scale - PROPERLY APPLY CUTOFF"""
+        """Update the color scale - FIXED to handle point cloud log scale properly"""
         try:
             print(f"\n=== UPDATING VISUALIZATION SCALE ===")
             
@@ -2203,16 +2256,17 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 print("ERROR: No mapper found")
                 return
             
-            # Get original range
-            if hasattr(self, 'current_scalar_range'):
+            # Get STORED original range (not current filtered range)
+            if hasattr(self, 'current_scalar_range') and self.current_scalar_range:
                 original_range = self.current_scalar_range
+                print(f"Using stored original range: {original_range}")
             else:
-                original_range = self.vtk_data.GetScalarRange()
-            
-            print(f"Original range: {original_range}")
+                original_range = self.vtk_data.GetScalarRange() if self.vtk_data else (1e-5, 1e7)
+                self.current_scalar_range = original_range
+                print(f"Fallback original range: {original_range}")
             
             # Get current settings
-            cutoff = getattr(self, 'current_flux_cutoff', 1e-8)  # Changed default to 1e-8
+            cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
             scale_mode = self.scale_mode_combo.currentText()
             
             print(f"Flux cutoff: {cutoff:.2e}")
@@ -2243,7 +2297,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             )
             
             # IMPORTANT: Set mapper range to EFFECTIVE range, not original
-            # This ensures data below cutoff gets mapped to the minimum color
             print(f"Setting mapper range to effective range: {effective_range}")
             mapper.SetScalarRange(effective_range[0], effective_range[1])
             mapper.SetLookupTable(lut)
@@ -2881,7 +2934,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Error regenerating point cloud: {e}")
 
     def setup_point_cloud_rendering(self):
-        """Point cloud rendering - RESTORED to working version with better range handling"""
+        """Point cloud rendering - FIXED to preserve proper scalar range for log scale"""
         if not self.vtk_data:
             return
             
@@ -2898,8 +2951,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             num_points = self.vtk_data.GetNumberOfPoints()
             print(f"Point cloud: {num_points} points, range: {scalar_range}")
             
-            # Store values for scale updates - USE RAW RANGE
+            # CRITICAL: Store ORIGINAL range BEFORE any filtering for proper color scaling
             self.current_scalar_range = scalar_range
+            print(f"Stored original scalar range: {scalar_range}")
             
             # Get target density from slider
             target_density = getattr(self, 'target_point_count', 
@@ -3922,7 +3976,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             return input_data  # Return original if jitter fails
 
     def create_point_cloud_glyphs(self, point_data, radius):
-        """Create the actual glyph visualization - ENSURE SCALAR RANGE IS PRESERVED"""
+        """Create the actual glyph visualization - FIXED to prevent log scale NaN issues"""
         if point_data.GetNumberOfPoints() == 0:
             print("No points to create glyphs for")
             return
@@ -3953,15 +4007,34 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             glyph_mapper = vtk.vtkPolyDataMapper()
             glyph_mapper.SetInputConnection(glyph.GetOutputPort())
             
-            # IMPORTANT: Use the original data range, not the filtered range
-            original_range = self.current_scalar_range
+            # CRITICAL FIX: Always use the stored original range, never the filtered range
+            if hasattr(self, 'current_scalar_range') and self.current_scalar_range:
+                original_range = self.current_scalar_range
+                print(f"Using stored original range: {original_range}")
+            else:
+                # Fallback: get from original data
+                original_range = self.vtk_data.GetScalarRange()
+                self.current_scalar_range = original_range
+                print(f"Fallback to VTK data range: {original_range}")
+            
+            # ADDITIONAL FIX: For log scale, ensure range doesn't include zeros
+            scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else "Linear"
+            if scale_mode == "Logarithmic":
+                min_val, max_val = original_range
+                if min_val <= 0:
+                    cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
+                    safe_min = max(cutoff, max_val * 1e-6)
+                    original_range = (safe_min, max_val)
+                    print(f"FIXED range for log scale: {original_range}")
+            
             glyph_mapper.SetScalarRange(original_range)
             glyph_mapper.ScalarVisibilityOn()
             
             print(f"Mapper scalar range set to: {original_range}")
             
-            # Setup lookup table with current settings
-            lut = self.create_lookup_table(self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red')
+            # Setup lookup table with current settings and SAFE range
+            colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red'
+            lut = self.create_lookup_table_with_scale(colormap_name, scale_mode, original_range)
             glyph_mapper.SetLookupTable(lut)
             
             # Create or update actor
@@ -3978,11 +4051,12 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             opacity = self.opacity_slider.value() / 100.0 if hasattr(self, 'opacity_slider') else 0.7
             self.field_actor.GetProperty().SetOpacity(opacity)
             
-            # Setup scalar bar with original range
+            # Setup scalar bar with SAFE original range
             scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
             self.setup_scalar_bar(lut, scalar_name)
             
             print(f"Glyphs created successfully: {point_data.GetNumberOfPoints()} spheres, radius {radius}m")
+            print(f"Color scale: {scale_mode} with range {original_range}")
             
         except Exception as e:
             print(f"Error creating glyphs: {e}")
@@ -4559,26 +4633,39 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         return self.create_lookup_table_with_scale(colormap_name, scale_mode, effective_range)
 
     def update_opacity(self, value):
-        """Update opacity - volume rendering uses dedicated threshold control, so this only affects other modes"""
+        """Update opacity - EXCLUDE all trail actors from transparency changes"""
         self.opacity_label.setText(f"{value}%")
 
-        # Skip volume rendering - it has its own dedicated threshold control
+        # Skip volume rendering
         if (hasattr(self, 'volume_actor') and self.volume_actor and 
             self.viz_mode_combo.currentText() == "Volume Rendering"):
-            return  # Do nothing for volume rendering
+            return
 
         try:
             opacity = value / 100.0
 
-            # Handle regular actors
+            # Handle regular field actors
             if hasattr(self, 'field_actor') and self.field_actor:
                 self.field_actor.GetProperty().SetOpacity(opacity)
 
-            # Handle other actors
+            # Handle slice actors
             if hasattr(self, 'slice_actors'):
                 for actor in self.slice_actors:
                     if actor:
                         actor.GetProperty().SetOpacity(opacity)
+
+            # KEEP ALL TRAIL ACTORS at their designed opacity
+            if hasattr(self, 'trail_actors'):
+                for i, actor in enumerate(self.trail_actors):
+                    if actor:
+                        # Preserve the fading effect opacity
+                        trail_position = i / (len(self.trail_actors) - 1) if len(self.trail_actors) > 1 else 1.0
+                        designed_opacity = 0.1 + 0.8 * trail_position
+                        actor.GetProperty().SetOpacity(designed_opacity)
+                print(f"Trail actors kept at designed opacity despite transparency setting of {value}%")
+            elif hasattr(self, 'trail_actor') and self.trail_actor:
+                # Handle old single actor case
+                self.trail_actor.GetProperty().SetOpacity(0.8)
 
             self.vtk_widget.GetRenderWindow().Render()
 
@@ -4819,13 +4906,18 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
     #     self.renderer.AddActor(self.earth_actor)
         
     def connect_signals(self):
-        """Connect UI signals to slots"""
+        """Connect UI signals - REMOVED duplicate timer connection"""
+        print("DEBUG: Connecting UI signals...")
+        
         self.load_vtk_button.clicked.connect(self.load_vtk_data)
         self.load_orbit_button.clicked.connect(self.load_orbital_data)
         
         self.play_button.clicked.connect(self.start_animation)
         self.pause_button.clicked.connect(self.pause_animation)
         self.stop_button.clicked.connect(self.stop_animation)
+        
+        # NOTE: Timer connection is now done in __init__
+        print("DEBUG: Timer connection handled in __init__")
         
         self.time_slider.valueChanged.connect(self.jump_to_time)
         self.speed_spinbox.valueChanged.connect(self.set_animation_speed)
@@ -4834,6 +4926,9 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.show_slice_button.clicked.connect(self.show_slice_window)
         self.show_spectrum_button.clicked.connect(self.show_spectrum_window)
         self.show_flux_time_button.clicked.connect(self.show_flux_time_window)
+        
+        print("DEBUG: All UI signals connected")
+
 
     def load_vtk_data(self):
         """Load VTK data file with comprehensive format support - CLEAN VERSION"""
@@ -5377,7 +5472,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         )
         
     def load_orbital_data(self):
-        """Load orbital CSV data"""
+        """Load orbital CSV data - UPDATED to respect hide orbital paths setting"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Orbital Data", "", "CSV Files (*.csv);;All Files (*)"
         )
@@ -5414,24 +5509,29 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             # Update analyzer
             self.flux_analyzer.set_orbital_data(self.orbital_path)
             
-            # Create path visualization
+            # Create path visualization (will respect hide checkbox if it exists)
             self.create_path_visualization()
             
             # Reset animation
             self.reset_animation()
             
-            self.status_label.setText(
+            # Update status message to mention the hide checkbox
+            status_msg = (
                 f"Loaded orbital data: {len(self.orbital_path)} points "
-                f"over {self.orbital_path[-1].time:.2f} hours"
+                f"over {self.orbital_path[-1].time:.2f} hours\n"
+                f"Use 'Hide Orbital Paths' checkbox to toggle path visibility"
             )
+            self.status_label.setText(status_msg)
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load orbital data:\n{str(e)}")
             
     def create_path_visualization(self):
-        """Create 3D orbital path visualization"""
+        """Create 3D orbital path visualization with improved styling - UPDATED for visibility control"""
         if not self.orbital_path:
             return
+            
+        print(f"Creating path visualization with {len(self.orbital_path)} points")
             
         # Create path polyline
         points = vtk.vtkPoints()
@@ -5459,132 +5559,312 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             
         self.path_actor = vtk.vtkActor()
         self.path_actor.SetMapper(path_mapper)
-        self.path_actor.GetProperty().SetColor(0.8, 0.8, 0.0)  # Yellow
-        self.path_actor.GetProperty().SetLineWidth(2.0)
-        self.path_actor.GetProperty().SetOpacity(0.7)
+        self.path_actor.GetProperty().SetColor(0.9, 0.9, 0.2)  # Bright yellow
+        self.path_actor.GetProperty().SetLineWidth(3.0)  # Thicker line
+        self.path_actor.GetProperty().SetOpacity(0.8)
+        
+        # Check if orbital paths should be hidden on creation
+        if hasattr(self, 'hide_orbital_paths') and self.hide_orbital_paths.isChecked():
+            self.path_actor.SetVisibility(False)
+            print("Orbital path created but hidden due to checkbox setting")
+        else:
+            self.path_actor.SetVisibility(True)
+            print("Orbital path created and visible")
         
         self.renderer.AddActor(self.path_actor)
         
         # Create object representation
         self.create_object_representation()
         
+        # Set initial position
+        if self.orbital_path:
+            first_point = self.orbital_path[0]
+            if hasattr(self, 'object_actor'):
+                self.object_actor.SetPosition(first_point.x, first_point.y, first_point.z)
+            if hasattr(self, 'satellite_border_actor'):
+                self.satellite_border_actor.SetPosition(first_point.x, first_point.y, first_point.z)
+        
         self.vtk_widget.GetRenderWindow().Render()
+        print("Path visualization created successfully")
         
     def create_object_representation(self):
-        """Create a more visible representation of the orbiting object"""
-        # Create a larger, more visible sphere
+        """Create satellite with FIXED random color application"""
+        import random
+        
+        # Calculate size
+        base_radius = max(self.cross_section_spinbox.value() * 100.0, 500.0)
+        
+        # Remove existing satellite actors
+        if hasattr(self, 'object_actor'):
+            self.renderer.RemoveActor(self.object_actor)
+        if hasattr(self, 'satellite_border_actor'):
+            self.renderer.RemoveActor(self.satellite_border_actor)
+        
+        # ALWAYS generate new random color
+        colors = [
+            [1.0, 0.2, 0.2],  # Bright red
+            [0.2, 1.0, 0.2],  # Bright green  
+            [1.0, 0.2, 1.0],  # Bright magenta
+            [0.2, 0.8, 1.0],  # Bright cyan
+            [1.0, 0.8, 0.2],  # Bright orange
+            [0.8, 0.2, 1.0],  # Bright purple
+            [1.0, 0.5, 0.8],  # Bright pink
+            [0.2, 1.0, 0.8],  # Bright teal
+        ]
+        self.satellite_color = random.choice(colors)
+        print(f"NEW satellite color: {self.satellite_color}")
+        
+        # Create main satellite sphere
         sphere = vtk.vtkSphereSource()
-        # Make it much larger for visibility (scale by cross-section * 50)
-        radius = max(self.cross_section_spinbox.value() * 50.0, 200.0)  # At least 200 km for visibility
-        sphere.SetRadius(radius)
-        sphere.SetThetaResolution(20)
-        sphere.SetPhiResolution(20)
+        sphere.SetRadius(base_radius)
+        sphere.SetThetaResolution(24)
+        sphere.SetPhiResolution(24)
         
         object_mapper = vtk.vtkPolyDataMapper()
         object_mapper.SetInputConnection(sphere.GetOutputPort())
         
-        if hasattr(self, 'object_actor'):
-            self.renderer.RemoveActor(self.object_actor)
-            
         self.object_actor = vtk.vtkActor()
         self.object_actor.SetMapper(object_mapper)
         
-        # Make it bright red and emissive for high visibility
-        self.object_actor.GetProperty().SetColor(1.0, 0.1, 0.1)  # Bright red
-        self.object_actor.GetProperty().SetAmbient(0.8)  # High ambient lighting
-        self.object_actor.GetProperty().SetDiffuse(0.9)  # High diffuse
-        self.object_actor.GetProperty().SetSpecular(0.5)  # Some shininess
-        self.object_actor.GetProperty().SetOpacity(1.0)  # Fully opaque
+        # FIXED: Proper color application
+        prop = self.object_actor.GetProperty()
+        prop.SetColor(self.satellite_color[0], self.satellite_color[1], self.satellite_color[2])
+        prop.SetAmbient(0.8)  # High ambient for visibility
+        prop.SetDiffuse(0.9)
+        prop.SetSpecular(0.3)
+        prop.SetOpacity(1.0)
+        
+        print(f"Applied color: R={self.satellite_color[0]}, G={self.satellite_color[1]}, B={self.satellite_color[2]}")
         
         self.renderer.AddActor(self.object_actor)
         
-        # Add a trail effect (keep last few positions)
-        self.create_satellite_trail()
+        # Create black outline
+        outline_radius = base_radius * 1.15
+        outline_sphere = vtk.vtkSphereSource()
+        outline_sphere.SetRadius(outline_radius)
+        outline_sphere.SetThetaResolution(32)
+        outline_sphere.SetPhiResolution(32)
         
-        print(f"Created satellite object with radius {radius:.1f} km")
+        outline_mapper = vtk.vtkPolyDataMapper()
+        outline_mapper.SetInputConnection(outline_sphere.GetOutputPort())
+        
+        self.satellite_border_actor = vtk.vtkActor()
+        self.satellite_border_actor.SetMapper(outline_mapper)
+        
+        # Black wireframe outline
+        outline_prop = self.satellite_border_actor.GetProperty()
+        outline_prop.SetRepresentationToWireframe()
+        outline_prop.SetColor(0.0, 0.0, 0.0)  # Black
+        outline_prop.SetLineWidth(4.0)
+        outline_prop.SetAmbient(1.0)
+        outline_prop.SetDiffuse(0.0)
+        outline_prop.SetOpacity(1.0)
+        
+        self.renderer.AddActor(self.satellite_border_actor)
+        
+        # Initialize trail
+        if hasattr(self, 'trail_points'):
+            self.trail_points.clear()
+        else:
+            self.trail_points = []
+        self.max_trail_length = 15  # Longer for better fading effect
+        
+        print(f"Created satellite: {self.satellite_color} core ({base_radius:.1f} km) with black outline")
 
     def create_satellite_trail(self):
-        """Create a trail showing recent satellite positions"""
-        if not hasattr(self, 'trail_points'):
-            self.trail_points = []
-            self.max_trail_length = 20  # Keep last 20 positions
+        """Create fading and tapering trail with multiple segments"""
+        print(f"\n*** CREATE_FADING_TRAIL: {len(self.trail_points)} points")
+        
+        if len(self.trail_points) < 2:
+            return
             
-        # Create trail polyline
-        if len(self.trail_points) > 1:
-            trail_vtk_points = vtk.vtkPoints()
-            trail_lines = vtk.vtkCellArray()
-            
-            for point in self.trail_points:
-                trail_vtk_points.InsertNextPoint(point)
+        # Remove existing trail actors
+        if hasattr(self, 'trail_actors'):
+            for actor in self.trail_actors:
+                self.renderer.RemoveActor(actor)
+        self.trail_actors = []
+        
+        try:
+            # Create individual segments with fading and tapering
+            for i in range(len(self.trail_points) - 1):
+                # Create single segment
+                points = vtk.vtkPoints()
+                points.InsertNextPoint(self.trail_points[i])
+                points.InsertNextPoint(self.trail_points[i + 1])
                 
-            # Create line segments
+                lines = vtk.vtkCellArray()
+                line = vtk.vtkLine()
+                line.GetPointIds().SetId(0, 0)
+                line.GetPointIds().SetId(1, 1)
+                lines.InsertNextCell(line)
+                
+                segment_polydata = vtk.vtkPolyData()
+                segment_polydata.SetPoints(points)
+                segment_polydata.SetLines(lines)
+                
+                # Create tube for this segment (for thickness control)
+                tube_filter = vtk.vtkTubeFilter()
+                tube_filter.SetInputData(segment_polydata)
+                
+                # Calculate position in trail (0 = oldest, 1 = newest)
+                trail_position = i / (len(self.trail_points) - 1)
+                
+                # Tapering: thicker at newest end, thinner at oldest end
+                min_radius = 50.0   # 50km minimum thickness
+                max_radius = 300.0  # 300km maximum thickness
+                radius = min_radius + (max_radius - min_radius) * trail_position
+                
+                tube_filter.SetRadius(radius)
+                tube_filter.SetNumberOfSides(8)
+                tube_filter.Update()
+                
+                # Create mapper
+                segment_mapper = vtk.vtkPolyDataMapper()
+                segment_mapper.SetInputConnection(tube_filter.GetOutputPort())
+                
+                # Create actor
+                segment_actor = vtk.vtkActor()
+                segment_actor.SetMapper(segment_mapper)
+                
+                # Fading: more transparent at older end, more opaque at newer end
+                min_opacity = 0.1   # 10% minimum opacity
+                max_opacity = 0.9   # 90% maximum opacity
+                opacity = min_opacity + (max_opacity - min_opacity) * trail_position
+                
+                # Set properties
+                prop = segment_actor.GetProperty()
+                prop.SetColor(1.0, 1.0, 1.0)  # White
+                prop.SetOpacity(opacity)
+                prop.SetAmbient(1.0)  # Full ambient
+                prop.SetDiffuse(0.0)  # No diffuse
+                prop.SetSpecular(0.0)  # No specular
+                
+                self.renderer.AddActor(segment_actor)
+                self.trail_actors.append(segment_actor)
+                
+                print(f"***   Segment {i}: position={trail_position:.2f}, radius={radius:.0f}km, opacity={opacity:.2f}")
+            
+            print(f"*** FADING TRAIL CREATED: {len(self.trail_actors)} segments")
+            
+        except Exception as e:
+            print(f"*** FADING TRAIL ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Fallback to simple line trail
+            print("*** Falling back to simple line trail...")
+            self.create_simple_trail_fallback()
+
+    def create_simple_trail_fallback(self):
+        """Fallback simple trail if tube filter fails"""
+        try:
+            points = vtk.vtkPoints()
+            lines = vtk.vtkCellArray()
+            
+            for i, point in enumerate(self.trail_points):
+                points.InsertNextPoint(point[0], point[1], point[2])
+            
             for i in range(len(self.trail_points) - 1):
                 line = vtk.vtkLine()
                 line.GetPointIds().SetId(0, i)
                 line.GetPointIds().SetId(1, i + 1)
-                trail_lines.InsertNextCell(line)
-                
-            trail_polydata = vtk.vtkPolyData()
-            trail_polydata.SetPoints(trail_vtk_points)
-            trail_polydata.SetLines(trail_lines)
+                lines.InsertNextCell(line)
             
-            trail_mapper = vtk.vtkPolyDataMapper()
-            trail_mapper.SetInputData(trail_polydata)
+            polydata = vtk.vtkPolyData()
+            polydata.SetPoints(points)
+            polydata.SetLines(lines)
             
-            if hasattr(self, 'trail_actor'):
-                self.renderer.RemoveActor(self.trail_actor)
-                
-            self.trail_actor = vtk.vtkActor()
-            self.trail_actor.SetMapper(trail_mapper)
-            self.trail_actor.GetProperty().SetColor(1.0, 0.5, 0.0)  # Orange trail
-            self.trail_actor.GetProperty().SetLineWidth(3.0)
-            self.trail_actor.GetProperty().SetOpacity(0.8)
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputData(polydata)
             
-            self.renderer.AddActor(self.trail_actor)
+            trail_actor = vtk.vtkActor()
+            trail_actor.SetMapper(mapper)
+            trail_actor.GetProperty().SetColor(1.0, 1.0, 1.0)
+            trail_actor.GetProperty().SetLineWidth(20.0)
+            trail_actor.GetProperty().SetOpacity(0.8)
+            
+            self.renderer.AddActor(trail_actor)
+            self.trail_actors = [trail_actor]
+            print("*** Simple fallback trail created")
+            
+        except Exception as e:
+            print(f"*** Even fallback trail failed: {e}")
 
     def update_visualization(self):
-        """Update the 3D visualization with better satellite tracking"""
+        """Update visualization - FIXED trail building logic"""
         if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
             return
             
         current_point = self.orbital_path[self.current_time_index]
+        satellite_position = [current_point.x, current_point.y, current_point.z]
         
-        # Update object position
+        # Update satellite position
         if hasattr(self, 'object_actor'):
-            self.object_actor.SetPosition(current_point.x, current_point.y, current_point.z)
+            self.object_actor.SetPosition(*satellite_position)
             
-            # Update trail
-            if not hasattr(self, 'trail_points'):
-                self.trail_points = []
+        if hasattr(self, 'satellite_border_actor'):
+            self.satellite_border_actor.SetPosition(*satellite_position)
+        
+        # Initialize trail system if needed
+        if not hasattr(self, 'trail_points'):
+            self.trail_points = []
+            self.max_trail_length = 10  # Shorter for easier debugging
+            print("=== TRAIL SYSTEM INITIALIZED ===")
+        
+        # ALWAYS add current position to trail
+        self.trail_points.append([current_point.x, current_point.y, current_point.z])
+        print(f"STEP {self.current_time_index}: Added point ({current_point.x:.0f}, {current_point.y:.0f}, {current_point.z:.0f}) - Total: {len(self.trail_points)}")
+        
+        # Limit trail length
+        if len(self.trail_points) > self.max_trail_length:
+            removed = self.trail_points.pop(0)
+            print(f"Removed old point: ({removed[0]:.0f}, {removed[1]:.0f}, {removed[2]:.0f})")
+        
+        # ALWAYS try to create trail if we have 2+ points
+
+        #print(f"{self.trail_points}")
+        
+        if len(self.trail_points) >= 2:
+            print(f"=== ATTEMPTING TRAIL CREATION with {len(self.trail_points)} points ===")
+            self.create_satellite_trail()
+            
+            # Verify trail was created
+            if hasattr(self, 'trail_actor') and self.trail_actor:
+                print(f"✓ Trail actor exists, visibility: {self.trail_actor.GetVisibility()}")
                 
-            self.trail_points.append([current_point.x, current_point.y, current_point.z])
-            
-            # Limit trail length
-            if len(self.trail_points) > self.max_trail_length:
-                self.trail_points.pop(0)
-                
-            # Update trail visualization
-            if len(self.trail_points) > 1:
-                self.create_satellite_trail()
-            
-        # Update time slider (but don't trigger callback)
+                # Double-check it's in the renderer
+                actors = self.renderer.GetActors()
+                actors.InitTraversal()
+                found_trail = False
+                actor_count = 0
+                while True:
+                    actor = actors.GetNextActor()
+                    if not actor:
+                        break
+                    actor_count += 1
+                    if actor == self.trail_actor:
+                        found_trail = True
+                        
+                print(f"Trail in renderer: {found_trail}, Total actors: {actor_count}")
+            else:
+                print("✗ Trail actor creation FAILED")
+        else:
+            print(f"Waiting for more points: {len(self.trail_points)}/2")
+        
+        # Update UI
         self.time_slider.blockSignals(True)
         self.time_slider.setValue(self.current_time_index)
         self.time_slider.blockSignals(False)
         
-        # Update time label
         hours = current_point.time
         h = int(hours)
         m = int((hours - h) * 60)
         s = int(((hours - h) * 60 - m) * 60)
         self.time_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
         
-        # Calculate and display flux
         flux = self.flux_analyzer.analyze_flux_at_point(current_point)
-        
-        # Update status with more detailed info
         distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
-        altitude = distance_from_earth - 6371  # Earth radius
+        altitude = distance_from_earth - 6371
         
         self.status_label.setText(
             f"Time: {current_point.time:.2f}h | Alt: {altitude:.1f}km\n"
@@ -5594,11 +5874,38 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         
         # Force render
         self.vtk_widget.GetRenderWindow().Render()
+
+    def debug_trail_system(self):
+        """Debug method to check trail system state"""
+        print("\n=== TRAIL SYSTEM DEBUG ===")
         
-        # Debug print for animation tracking
-        if self.current_time_index % 10 == 0:  # Print every 10th step
-            print(f"Animation step {self.current_time_index}: t={current_point.time:.2f}h, "
-                  f"pos=({current_point.x:.0f},{current_point.y:.0f},{current_point.z:.0f})")
+        print(f"Trail points: {len(self.trail_points) if hasattr(self, 'trail_points') else 'None'}")
+        if hasattr(self, 'trail_points') and self.trail_points:
+            for i, point in enumerate(self.trail_points):
+                print(f"  Point {i}: ({point[0]:.0f}, {point[1]:.0f}, {point[2]:.0f})")
+        
+        print(f"Trail actor exists: {hasattr(self, 'trail_actor') and self.trail_actor is not None}")
+        if hasattr(self, 'trail_actor') and self.trail_actor:
+            print(f"  Visibility: {self.trail_actor.GetVisibility()}")
+            print(f"  Opacity: {self.trail_actor.GetProperty().GetOpacity()}")
+            print(f"  Color: {self.trail_actor.GetProperty().GetColor()}")
+            
+        # Check renderer
+        actors = self.renderer.GetActors()
+        actors.InitTraversal()
+        actor_count = 0
+        trail_in_renderer = False
+        while True:
+            actor = actors.GetNextActor()
+            if not actor:
+                break
+            actor_count += 1
+            if hasattr(self, 'trail_actor') and actor == self.trail_actor:
+                trail_in_renderer = True
+                
+        print(f"Total actors in renderer: {actor_count}")
+        print(f"Trail actor in renderer: {trail_in_renderer}")
+        print("=========================\n")
 
     def animation_step(self):
         """Perform one animation step with wraparound"""
@@ -5619,89 +5926,126 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.update_plots()
 
     def start_animation(self):
-        """Start the orbital animation with improved feedback"""
-        if not self.orbital_path:
-            QMessageBox.warning(self, "Warning", "Please load orbital path data first.")
+        """Start animation - CLEAN VERSION"""
+        if not self.orbital_path or not self.vtk_data:
+            QMessageBox.warning(self, "Warning", "Please load both VTK data and orbital path first.")
             return
             
-        if not self.vtk_data:
-            QMessageBox.warning(self, "Warning", "Please load VTK flux data first.")
-            return
-            
-        print(f"Starting animation with {len(self.orbital_path)} orbital points")
-        print(f"Current time index: {self.current_time_index}")
-        print(f"Animation speed: {self.speed_spinbox.value()} ms")
+        print(f"\n=== STARTING ANIMATION ===")
+        print(f"Orbital points: {len(self.orbital_path)}")
         
+        # Clear trail system
+        if hasattr(self, 'trail_points'):
+            self.trail_points.clear()
+        else:
+            self.trail_points = []
+            
+        if hasattr(self, 'trail_actors'):
+            for actor in self.trail_actors:
+                self.renderer.RemoveActor(actor)
+            self.trail_actors = []
+        elif hasattr(self, 'trail_actor'):
+            self.renderer.RemoveActor(self.trail_actor)
+            delattr(self, 'trail_actor')
+        
+        # Start animation
         self.is_playing = True
         self.animation_timer.start(self.speed_spinbox.value())
         
-        # Show plot windows if they exist
-        if self.slice_window:
-            self.slice_window.show()
-        if self.spectrum_window:
-            self.spectrum_window.show()
-        if self.flux_time_window:
-            self.flux_time_window.show()
-            
+        # Update UI
         self.play_button.setEnabled(False)
         self.pause_button.setEnabled(True)
         self.stop_button.setEnabled(True)
         
-        # Force an immediate update
-        self.update_visualization()
+        print("=== ANIMATION STARTED ===\n")
 
     def reset_animation(self):
-        """Reset animation to beginning with trail cleanup"""
+        """Reset animation - ENHANCED for multiple trail actors"""
+        print("\n=== RESETTING ANIMATION ===")
+        
         self.current_time_index = 0
         
-        # Clear trail
+        # Clear trail points
         if hasattr(self, 'trail_points'):
             self.trail_points.clear()
+            print("Cleared trail points")
             
-        # Remove trail actor
-        if hasattr(self, 'trail_actor'):
+        # Remove all trail actors
+        if hasattr(self, 'trail_actors'):
+            for actor in self.trail_actors:
+                self.renderer.RemoveActor(actor)
+            self.trail_actors = []
+            print("Removed all trail actors")
+        elif hasattr(self, 'trail_actor'):
+            # Handle old single actor case
             self.renderer.RemoveActor(self.trail_actor)
             delattr(self, 'trail_actor')
+            print("Removed single trail actor")
             
-        # Clear flux time data
+        # Clear flux data
         if self.flux_time_window:
             self.flux_time_window.clear_data()
             
+        # Force new satellite color and recreate
+        if hasattr(self, 'satellite_color'):
+            delattr(self, 'satellite_color')
+            
+        if hasattr(self, 'orbital_path') and self.orbital_path:
+            self.create_object_representation()
+            first_point = self.orbital_path[0]
+            if hasattr(self, 'object_actor'):
+                self.object_actor.SetPosition(first_point.x, first_point.y, first_point.z)
+            if hasattr(self, 'satellite_border_actor'):
+                self.satellite_border_actor.SetPosition(first_point.x, first_point.y, first_point.z)
+        
         self.update_visualization()
-        print("Animation reset to beginning")
+        print("=== RESET COMPLETE with new satellite color ===\n")
 
     def jump_to_time(self, time_index):
-        """Jump to specific time index with trail update"""
+        """Jump to specific time index with trail reset for large jumps"""
         if 0 <= time_index < len(self.orbital_path):
             old_index = self.current_time_index
             self.current_time_index = time_index
             
             # If jumping backwards or far forward, reset trail
-            if time_index < old_index or abs(time_index - old_index) > 5:
+            if time_index < old_index or abs(time_index - old_index) > 10:
                 if hasattr(self, 'trail_points'):
                     self.trail_points.clear()
+                if hasattr(self, 'trail_actor'):
+                    self.renderer.RemoveActor(self.trail_actor)
+                    delattr(self, 'trail_actor')
                 print(f"Jumped to time index {time_index}, trail reset")
             
             self.update_visualization()
             self.update_plots()
 
     def update_cross_section(self, radius):
-        """Update object cross section and visual representation"""
+        """Update object cross section and visual representation - UPDATED for new satellite design"""
         self.flux_analyzer.set_cross_section(radius)
         
-        # Recreate object with new size
-        if hasattr(self, 'object_actor'):
-            self.renderer.RemoveActor(self.object_actor)
+        # Recreate satellite with new size
+        if hasattr(self, 'object_actor') or hasattr(self, 'satellite_border_actor'):
+            # Store current position if we have one
+            current_position = None
+            if hasattr(self, 'object_actor') and self.object_actor:
+                current_position = self.object_actor.GetPosition()
+            
+            # Recreate the satellite representation
             self.create_object_representation()
             
-            # Update position if we have one
-            if self.orbital_path and 0 <= self.current_time_index < len(self.orbital_path):
+            # Restore position if we had one
+            if current_position and self.orbital_path and 0 <= self.current_time_index < len(self.orbital_path):
                 current_point = self.orbital_path[self.current_time_index]
-                self.object_actor.SetPosition(current_point.x, current_point.y, current_point.z)
+                satellite_position = [current_point.x, current_point.y, current_point.z]
+                
+                if hasattr(self, 'object_actor'):
+                    self.object_actor.SetPosition(*satellite_position)
+                if hasattr(self, 'satellite_border_actor'):
+                    self.satellite_border_actor.SetPosition(*satellite_position)
                 
             self.vtk_widget.GetRenderWindow().Render()
             
-        print(f"Updated cross-section radius to {radius:.1f} m")
+        print(f"Updated satellite cross-section radius to {radius:.1f} m")
 
     def create_path_visualization(self):
         """Create 3D orbital path visualization with improved styling"""
@@ -5755,15 +6099,28 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         print("Path visualization created successfully")
         
     def start_animation(self):
-        """Start the orbital animation"""
-        if not self.orbital_path or not self.vtk_data:
-            QMessageBox.warning(self, "Warning", "Please load both VTK data and orbital path first.")
+        """Start the orbital animation with trail debugging"""
+        if not self.orbital_path:
+            QMessageBox.warning(self, "Warning", "Please load orbital path data first.")
             return
             
+        if not self.vtk_data:
+            QMessageBox.warning(self, "Warning", "Please load VTK flux data first.")
+            return
+            
+        print(f"Starting animation with {len(self.orbital_path)} orbital points")
+        print(f"Current time index: {self.current_time_index}")
+        print(f"Animation speed: {self.speed_spinbox.value()} ms")
+        
+        # Clear trail on start
+        if hasattr(self, 'trail_points'):
+            self.trail_points.clear()
+            print("Cleared trail on animation start")
+        
         self.is_playing = True
         self.animation_timer.start(self.speed_spinbox.value())
         
-        # Show plot windows
+        # Show plot windows if they exist
         if self.slice_window:
             self.slice_window.show()
         if self.spectrum_window:
@@ -5775,65 +6132,126 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.pause_button.setEnabled(True)
         self.stop_button.setEnabled(True)
         
+        # Force an immediate update
+        self.update_visualization()
+        
     def pause_animation(self):
-        """Pause the animation"""
+        """Pause animation - ENHANCED debugging"""
+        print("\nDEBUG: pause_animation() called")
+        print(f"DEBUG: Timer active before pause: {self.animation_timer.isActive()}")
+        
         self.is_playing = False
         self.animation_timer.stop()
         
+        print(f"DEBUG: Timer active after pause: {self.animation_timer.isActive()}")
+        print(f"DEBUG: is_playing = {self.is_playing}")
+        
         self.play_button.setEnabled(True)
         self.pause_button.setEnabled(False)
-        
+        print("DEBUG: pause_animation() completed\n")
+
     def stop_animation(self):
-        """Stop the animation"""
+        """Stop animation - ENHANCED debugging"""
+        print("\nDEBUG: stop_animation() called")
+        print(f"DEBUG: Timer active before stop: {self.animation_timer.isActive()}")
+        
         self.is_playing = False
         self.animation_timer.stop()
         self.reset_animation()
         
+        print(f"DEBUG: Timer active after stop: {self.animation_timer.isActive()}")
+        print(f"DEBUG: is_playing = {self.is_playing}")
+        
         self.play_button.setEnabled(True)
         self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
+        print("DEBUG: stop_animation() completed\n")
         
     def animation_step(self):
-        """Perform one animation step"""
-        if self.current_time_index >= len(self.orbital_path) - 1:
-            # Completed one orbit
-            self.stop_animation()
+        """Animation step - ENHANCED debugging"""
+        print(f"\n>>> ANIMATION_STEP called: index={self.current_time_index}, is_playing={self.is_playing}, timer_active={self.animation_timer.isActive()}")
+        
+        if not self.orbital_path:
+            print(">>> ERROR: No orbital path in animation_step!")
             return
             
-        self.current_time_index += 1
+        if self.current_time_index >= len(self.orbital_path) - 1:
+            print(f">>> Animation completed: {self.current_time_index} >= {len(self.orbital_path)-1}")
+            # Loop back to beginning
+            self.current_time_index = 0
+            if hasattr(self, 'trail_points'):
+                self.trail_points.clear()
+            print(">>> Animation restarted from beginning")
+        else:
+            self.current_time_index += 1
+            print(f">>> Advanced to index: {self.current_time_index}")
+            
+        print(">>> Calling update_visualization() from animation_step")
         self.update_visualization()
+        
+        print(">>> Calling update_plots() from animation_step")
         self.update_plots()
         
+        print(f">>> ANIMATION_STEP completed for index {self.current_time_index}\n")
+        
     def update_visualization(self):
-        """Update the 3D visualization"""
+        """Update visualization - SIMPLIFIED for debugging"""
+        print(f"\n--- UPDATE_VISUALIZATION called: index={self.current_time_index}")
+        
         if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
+            print("--- ERROR: Invalid orbital data or index")
             return
             
         current_point = self.orbital_path[self.current_time_index]
+        satellite_position = [current_point.x, current_point.y, current_point.z]
+        print(f"--- Position: ({satellite_position[0]:.0f}, {satellite_position[1]:.0f}, {satellite_position[2]:.0f})")
         
-        # Update object position
+        # Update satellite
         if hasattr(self, 'object_actor'):
-            self.object_actor.SetPosition(current_point.x, current_point.y, current_point.z)
-            
-        # Update time slider
-        self.time_slider.setValue(self.current_time_index)
+            self.object_actor.SetPosition(*satellite_position)
+        if hasattr(self, 'satellite_border_actor'):
+            self.satellite_border_actor.SetPosition(*satellite_position)
         
-        # Update time label
+        # Trail system
+        if not hasattr(self, 'trail_points'):
+            self.trail_points = []
+            self.max_trail_length = 10
+        
+        self.trail_points.append([current_point.x, current_point.y, current_point.z])
+        print(f"--- Added trail point: total={len(self.trail_points)}")
+        
+        if len(self.trail_points) > self.max_trail_length:
+            self.trail_points.pop(0)
+        
+        # Create trail
+        print(f"Trail points: {self.trail_points}")
+        if len(self.trail_points) >= 2:
+            print(f"=== ATTEMPTING TRAIL CREATION with {len(self.trail_points)} points ===")
+            self.create_satellite_trail()
+        
+        # Update UI
         hours = current_point.time
         h = int(hours)
         m = int((hours - h) * 60)
         s = int(((hours - h) * 60 - m) * 60)
         self.time_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
         
-        # Update status
         flux = self.flux_analyzer.analyze_flux_at_point(current_point)
+        distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
+        altitude = distance_from_earth - 6371
+        
         self.status_label.setText(
-            f"Time: {current_point.time:.2f}h | "
-            f"Position: ({current_point.x:.1f}, {current_point.y:.1f}, {current_point.z:.1f}) km | "
+            f"Time: {current_point.time:.2f}h | Alt: {altitude:.1f}km\n"
+            f"Pos: ({current_point.x:.0f}, {current_point.y:.0f}, {current_point.z:.0f}) km\n"
             f"Flux: {flux:.2e} particles/s"
         )
         
+        self.time_slider.blockSignals(True)
+        self.time_slider.setValue(self.current_time_index)
+        self.time_slider.blockSignals(False)
+        
         self.vtk_widget.GetRenderWindow().Render()
+        print(f"--- UPDATE_VISUALIZATION completed")
         
     def update_plots(self):
         """Update all plot windows"""
