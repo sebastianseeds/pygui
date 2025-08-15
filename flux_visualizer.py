@@ -3794,126 +3794,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Isosurface rendering failed: {e}")
             self.setup_point_cloud_rendering()
 
-    # def setup_point_cloud_rendering(self):
-    #     """Fixed point cloud with better threshold logic"""
-    #     if not self.vtk_data:
-    #         return
-            
-    #     print("Setting up optimized point cloud rendering...")
-        
-    #     try:
-    #         # Get scalar data
-    #         scalar_array = self.vtk_data.GetPointData().GetScalars()
-    #         if not scalar_array:
-    #             print("No scalar data for point cloud")
-    #             return
-                
-    #         scalar_range = scalar_array.GetRange()
-    #         num_points = self.vtk_data.GetNumberOfPoints()
-    #         print(f"Point cloud: {num_points} points, range: {scalar_range}")
-            
-    #         # Store these values for later use
-    #         self.current_scalar_range = scalar_range
-            
-    #         # Better threshold logic - check the data distribution first
-    #         print("Analyzing data distribution...")
-    #         non_zero_count = 0
-    #         sample_size = min(1000, scalar_array.GetSize())
-            
-    #         for i in range(sample_size):
-    #             if scalar_array.GetValue(i) > 0:
-    #                 non_zero_count += 1
-                    
-    #         non_zero_fraction = non_zero_count / sample_size
-    #         print(f"Non-zero values in sample: {non_zero_count}/{sample_size} ({non_zero_fraction:.1%})")
-            
-    #         # Adaptive threshold based on data distribution
-    #         if non_zero_fraction > 0.5:
-    #             # Most data is non-zero, use higher threshold
-    #             threshold_fraction = 0.05  # 5%
-    #         elif non_zero_fraction > 0.1:
-    #             # Some data is non-zero, use medium threshold  
-    #             threshold_fraction = 0.01  # 1%
-    #         else:
-    #             # Most data is zero, use very low threshold
-    #             threshold_fraction = 0.001  # 0.1%
-            
-    #         self.original_threshold_fraction = threshold_fraction
-            
-    #         # Apply threshold
-    #         threshold = vtk.vtkThreshold()
-    #         threshold.SetInputData(self.vtk_data)
-    #         threshold_value = scalar_range[1] * threshold_fraction
-    #         print(f"Using threshold: {threshold_value:.2e} ({threshold_fraction:.1%} of max)")
-            
-    #         threshold.SetLowerThreshold(threshold_value)
-    #         threshold.SetThresholdFunction(vtk.vtkThreshold.THRESHOLD_UPPER)
-    #         threshold.Update()
-            
-    #         significant_data = threshold.GetOutput()
-    #         significant_points = significant_data.GetNumberOfPoints()
-    #         print(f"Significant flux points: {significant_points}")
-            
-    #         # If still no points, try progressively lower thresholds
-    #         if significant_points == 0:
-    #             print("No points found, trying lower thresholds...")
-                
-    #             for lower_fraction in [0.001, 0.0001, 0.00001, 0.0]:
-    #                 threshold_value = scalar_range[1] * lower_fraction
-    #                 threshold.SetLowerThreshold(threshold_value)
-    #                 threshold.Update()
-    #                 significant_data = threshold.GetOutput()
-    #                 significant_points = significant_data.GetNumberOfPoints()
-    #                 print(f"  Threshold {threshold_value:.2e}: {significant_points} points")
-                    
-    #                 if significant_points > 0:
-    #                     self.original_threshold_fraction = lower_fraction
-    #                     break
-                        
-    #             # If still nothing, use all data
-    #             if significant_points == 0:
-    #                 print("Using all data (no threshold)")
-    #                 significant_data = self.vtk_data
-    #                 significant_points = num_points
-    #                 self.original_threshold_fraction = 0.0
-            
-    #         # Subsample for performance
-    #         target_points = 2000
-    #         if significant_points > target_points:
-    #             print(f"Subsampling to {target_points} points for performance...")
-    #             mask = vtk.vtkMaskPoints()
-    #             mask.SetInputData(significant_data)
-    #             mask.SetMaximumNumberOfPoints(target_points)
-    #             mask.SetRandomMode(True)
-    #             mask.Update()
-    #             final_data = mask.GetOutput()
-    #         else:
-    #             final_data = significant_data
-                
-    #         final_point_count = final_data.GetNumberOfPoints()
-    #         print(f"Final point count: {final_point_count}")
-            
-    #         if final_point_count == 0:
-    #             print("ERROR: No points to visualize!")
-    #             return
-            
-    #         # Add jitter to break up grid artifacts
-    #         jittered_data = self.add_spatial_jitter(final_data)
-            
-    #         # Store for later updates
-    #         self.current_final_data = jittered_data
-            
-    #         # Create initial visualization
-    #         initial_radius = self.point_size_slider.value() if hasattr(self, 'point_size_slider') else 400
-    #         self.create_point_cloud_glyphs(jittered_data, initial_radius)
-            
-    #         print(f"Point cloud setup complete: {jittered_data.GetNumberOfPoints()} visible spheres")
-            
-    #     except Exception as e:
-    #         print(f"Point cloud rendering failed: {e}")
-    #         import traceback
-    #         traceback.print_exc()
-
     def add_spatial_jitter(self, input_data):
         """Add random spatial jitter to break up grid artifacts"""
         if input_data.GetNumberOfPoints() == 0:
@@ -5588,11 +5468,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         print("Path visualization created successfully")
         
     def create_object_representation(self):
-        """Create satellite with proper color application"""
+        """Create satellite with DETAILED color debugging"""
         import random
+        
+        print("\n=== SATELLITE COLOR DEBUG ===")
         
         # Calculate size
         base_radius = max(self.cross_section_spinbox.value() * 100.0, 500.0)
+        print(f"Satellite radius: {base_radius}")
         
         # Remove existing satellite actors
         if hasattr(self, 'object_actor'):
@@ -5600,7 +5483,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         if hasattr(self, 'satellite_border_actor'):
             self.renderer.RemoveActor(self.satellite_border_actor)
         
-        # Generate new random color
+        # Generate color
         colors = [
             [1.0, 0.2, 0.2],  # Bright red
             [0.2, 1.0, 0.2],  # Bright green  
@@ -5611,60 +5494,94 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             [1.0, 0.5, 0.8],  # Bright pink
             [0.2, 1.0, 0.8],  # Bright teal
         ]
-        self.satellite_color = random.choice(colors)
+        chosen_color = random.choice(colors)
+        print(f"Chosen color: {chosen_color}")
         
-        # Create main satellite sphere
+        # Create sphere
         sphere = vtk.vtkSphereSource()
         sphere.SetRadius(base_radius)
         sphere.SetThetaResolution(24)
         sphere.SetPhiResolution(24)
+        sphere.Update()
+        print(f"Sphere created with {sphere.GetOutput().GetNumberOfPoints()} points")
         
+        # Create mapper
         object_mapper = vtk.vtkPolyDataMapper()
         object_mapper.SetInputConnection(sphere.GetOutputPort())
+        print(f"Mapper scalar visibility BEFORE: {object_mapper.GetScalarVisibility()}")
+        object_mapper.ScalarVisibilityOff()
+        print(f"Mapper scalar visibility AFTER: {object_mapper.GetScalarVisibility()}")
         
+        # Create actor
         self.object_actor = vtk.vtkActor()
         self.object_actor.SetMapper(object_mapper)
         
-        # Apply color properly
+        # Apply color
         prop = self.object_actor.GetProperty()
-        prop.SetColor(self.satellite_color[0], self.satellite_color[1], self.satellite_color[2])
-        prop.SetAmbient(0.8)
-        prop.SetDiffuse(0.9)
-        prop.SetSpecular(0.3)
+        print(f"Property color BEFORE: {prop.GetColor()}")
+        prop.SetColor(chosen_color[0], chosen_color[1], chosen_color[2])
+        print(f"Property color AFTER: {prop.GetColor()}")
+        
+        prop.SetAmbient(0.9)
+        prop.SetDiffuse(0.8)
+        prop.SetSpecular(0.1)
         prop.SetOpacity(1.0)
         
+        print(f"Ambient: {prop.GetAmbient()}")
+        print(f"Diffuse: {prop.GetDiffuse()}")
+        print(f"Opacity: {prop.GetOpacity()}")
+        
+        # Add to renderer
         self.renderer.AddActor(self.object_actor)
+        print("Actor added to renderer")
         
-        # Create black outline
-        outline_radius = base_radius * 1.15
-        outline_sphere = vtk.vtkSphereSource()
-        outline_sphere.SetRadius(outline_radius)
-        outline_sphere.SetThetaResolution(32)
-        outline_sphere.SetPhiResolution(32)
+        # Check if actor is in renderer
+        actors = self.renderer.GetActors()
+        actors.InitTraversal()
+        actor_count = 0
+        found_our_actor = False
+        while True:
+            actor = actors.GetNextActor()
+            if not actor:
+                break
+            actor_count += 1
+            if actor == self.object_actor:
+                found_our_actor = True
+                print(f"Found our actor in renderer at position {actor_count}")
+                actor_color = actor.GetProperty().GetColor()
+                print(f"Actor color in renderer: {actor_color}")
         
-        outline_mapper = vtk.vtkPolyDataMapper()
-        outline_mapper.SetInputConnection(outline_sphere.GetOutputPort())
+        print(f"Total actors in renderer: {actor_count}")
+        print(f"Our actor found: {found_our_actor}")
         
-        self.satellite_border_actor = vtk.vtkActor()
-        self.satellite_border_actor.SetMapper(outline_mapper)
+        # Check visibility and lighting
+        print(f"Actor visibility: {self.object_actor.GetVisibility()}")
+        print(f"Actor pickable: {self.object_actor.GetPickable()}")
         
-        # Black wireframe outline
-        outline_prop = self.satellite_border_actor.GetProperty()
-        outline_prop.SetRepresentationToWireframe()
-        outline_prop.SetColor(0.0, 0.0, 0.0)
-        outline_prop.SetLineWidth(4.0)
-        outline_prop.SetAmbient(1.0)
-        outline_prop.SetDiffuse(0.0)
-        outline_prop.SetOpacity(1.0)
+        # Check position
+        pos = self.object_actor.GetPosition()
+        print(f"Actor position: {pos}")
         
-        self.renderer.AddActor(self.satellite_border_actor)
+        # Check bounds
+        bounds = self.object_actor.GetBounds()
+        print(f"Actor bounds: {bounds}")
         
-        # Initialize trail
-        if not hasattr(self, 'trail_points'):
-            self.trail_points = []
-        else:
-            self.trail_points.clear()
-        self.max_trail_length = 15
+        # Check renderer lights
+        lights = self.renderer.GetLights()
+        print(f"Renderer has {lights.GetNumberOfItems()} lights")
+        
+        # Check camera position
+        camera = self.renderer.GetActiveCamera()
+        cam_pos = camera.GetPosition()
+        cam_focal = camera.GetFocalPoint()
+        print(f"Camera position: {cam_pos}")
+        print(f"Camera focal point: {cam_focal}")
+        
+        # Check if satellite is at origin (might be hidden by Earth)
+        if abs(pos[0]) < 10 and abs(pos[1]) < 10 and abs(pos[2]) < 10:
+            print("WARNING: Satellite is at origin - might be hidden inside Earth!")
+        
+        print("=== SATELLITE DEBUG COMPLETE ===\n")
 
     def create_satellite_trail(self):
         """Create fading and tapering trail with multiple segments"""
@@ -5773,7 +5690,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Trail creation failed: {e}")
 
     def update_visualization(self):
-        """Update visualization - cleaned up version"""
+        """Update visualization - no debug output"""
         if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
             return
             
@@ -5860,7 +5777,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         print("=========================\n")
 
     def animation_step(self):
-        """Perform one animation step with wraparound"""
+        """Perform one animation step with wraparound - no debug output"""
         if not self.orbital_path:
             return
             
@@ -6100,68 +6017,56 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.stop_button.setEnabled(False)
         
     def animation_step(self):
-        """Animation step - ENHANCED debugging"""
-        print(f"\n>>> ANIMATION_STEP called: index={self.current_time_index}, is_playing={self.is_playing}, timer_active={self.animation_timer.isActive()}")
-        
+        """Perform one animation step with wraparound"""
         if not self.orbital_path:
-            print(">>> ERROR: No orbital path in animation_step!")
             return
             
         if self.current_time_index >= len(self.orbital_path) - 1:
-            print(f">>> Animation completed: {self.current_time_index} >= {len(self.orbital_path)-1}")
-            # Loop back to beginning
             self.current_time_index = 0
             if hasattr(self, 'trail_points'):
                 self.trail_points.clear()
-            print(">>> Animation restarted from beginning")
         else:
             self.current_time_index += 1
-            print(f">>> Advanced to index: {self.current_time_index}")
             
-        print(">>> Calling update_visualization() from animation_step")
         self.update_visualization()
-        
-        print(">>> Calling update_plots() from animation_step")
         self.update_plots()
         
-        print(f">>> ANIMATION_STEP completed for index {self.current_time_index}\n")
-        
     def update_visualization(self):
-        """Update visualization - SIMPLIFIED for debugging"""
-        print(f"\n--- UPDATE_VISUALIZATION called: index={self.current_time_index}")
-        
+        """Update visualization"""
         if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
-            print("--- ERROR: Invalid orbital data or index")
             return
             
         current_point = self.orbital_path[self.current_time_index]
         satellite_position = [current_point.x, current_point.y, current_point.z]
-        print(f"--- Position: ({satellite_position[0]:.0f}, {satellite_position[1]:.0f}, {satellite_position[2]:.0f})")
         
-        # Update satellite
+        # Update satellite position
         if hasattr(self, 'object_actor'):
             self.object_actor.SetPosition(*satellite_position)
+            
         if hasattr(self, 'satellite_border_actor'):
             self.satellite_border_actor.SetPosition(*satellite_position)
         
-        # Trail system
+        # Initialize trail system if needed
         if not hasattr(self, 'trail_points'):
             self.trail_points = []
-            self.max_trail_length = 10
+            self.max_trail_length = 15
         
+        # Add current position to trail
         self.trail_points.append([current_point.x, current_point.y, current_point.z])
-        print(f"--- Added trail point: total={len(self.trail_points)}")
         
+        # Limit trail length
         if len(self.trail_points) > self.max_trail_length:
             self.trail_points.pop(0)
         
-        # Create trail
-        print(f"Trail points: {self.trail_points}")
+        # Create trail if we have enough points
         if len(self.trail_points) >= 2:
-            print(f"=== ATTEMPTING TRAIL CREATION with {len(self.trail_points)} points ===")
             self.create_satellite_trail()
         
-        # Update UI
+        # Update UI elements
+        self.time_slider.blockSignals(True)
+        self.time_slider.setValue(self.current_time_index)
+        self.time_slider.blockSignals(False)
+        
         hours = current_point.time
         h = int(hours)
         m = int((hours - h) * 60)
@@ -6178,12 +6083,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             f"Flux: {flux:.2e} particles/s"
         )
         
-        self.time_slider.blockSignals(True)
-        self.time_slider.setValue(self.current_time_index)
-        self.time_slider.blockSignals(False)
-        
         self.vtk_widget.GetRenderWindow().Render()
-        print(f"--- UPDATE_VISUALIZATION completed")
         
     def update_plots(self):
         """Update all plot windows"""
