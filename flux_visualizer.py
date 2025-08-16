@@ -695,7 +695,7 @@ class ElectronFluxVisualizer(QMainWindow):
         self.connect_signals()
         
     def setup_vtk(self):
-        """Setup VTK 3D visualization - DEBUG VERSION"""
+        """Setup VTK 3D visualization - REVERTED TO ORIGINAL"""
         print("=== SETTING UP VTK RENDERER ===")
         
         # Renderer
@@ -720,6 +720,14 @@ class ElectronFluxVisualizer(QMainWindow):
             print("Earth created successfully")
         else:
             print("WARNING: Earth creation failed, continuing without Earth")
+        
+        # Create finite starfield background
+        print("Creating finite starfield background...")
+        starfield_success = self.create_starfield_background()
+        if starfield_success:
+            print("Starfield background created successfully")
+        else:
+            print("WARNING: Starfield creation failed")
         
         # Add coordinate axes
         print("Setting up coordinate axes...")
@@ -1017,6 +1025,361 @@ class ElectronFluxVisualizer(QMainWindow):
         self.renderer.ResetCameraClippingRange()
         self.vtk_widget.GetRenderWindow().Render()
 
+    def toggle_starfield(self, state):
+        """Toggle starfield background visibility - REVERTED TO ORIGINAL"""
+        try:
+            show_starfield = state == 2  # Qt.Checked = 2
+            
+            print(f"Toggling starfield: {'ON' if show_starfield else 'OFF'}")
+            
+            if show_starfield:
+                # Create or show the starfield
+                if not hasattr(self, 'starfield_actor') or not self.starfield_actor:
+                    self.create_starfield_background()
+                else:
+                    # Show existing starfield
+                    self.starfield_actor.SetVisibility(True)
+            else:
+                # Hide the starfield
+                if hasattr(self, 'starfield_actor') and self.starfield_actor:
+                    self.starfield_actor.SetVisibility(False)
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+                
+            status = "visible" if show_starfield else "hidden"
+            print(f"Starfield is now {status}")
+                
+        except Exception as e:
+            print(f"Error toggling starfield: {e}")
+            import traceback
+            traceback.print_exc()
+        
+    def create_starfield_background(self):
+        """Create a realistic starfield background sphere"""
+        try:
+            print("Creating starfield background...")
+            
+            # Remove existing starfield if it exists
+            if hasattr(self, 'starfield_actor'):
+                self.renderer.RemoveActor(self.starfield_actor)
+            
+            # Create a very large sphere to contain the scene
+            starfield_radius = 500000.0  # 500,000 km - much larger than data bounds
+            
+            starfield_sphere = vtk.vtkSphereSource()
+            starfield_sphere.SetRadius(starfield_radius)
+            starfield_sphere.SetThetaResolution(120)  # High resolution for smooth stars
+            starfield_sphere.SetPhiResolution(120)
+            starfield_sphere.SetCenter(0.0, 0.0, 0.0)
+            starfield_sphere.Update()
+            
+            # Get the sphere data
+            sphere_data = starfield_sphere.GetOutput()
+            
+            # Add texture coordinates for star map
+            self.add_starfield_texture_coordinates(sphere_data)
+            
+            # Create mapper and actor
+            starfield_mapper = vtk.vtkPolyDataMapper()
+            starfield_mapper.SetInputData(sphere_data)
+            
+            self.starfield_actor = vtk.vtkActor()
+            self.starfield_actor.SetMapper(starfield_mapper)
+            
+            # Try to load a star map texture
+            star_texture = self.load_starfield_texture()
+            if star_texture:
+                self.starfield_actor.SetTexture(star_texture)
+                print("Applied star map texture")
+            else:
+                # Fallback to procedural starfield
+                self.apply_procedural_starfield_material()
+                print("Applied procedural starfield")
+            
+            # Set starfield properties
+            starfield_property = self.starfield_actor.GetProperty()
+            starfield_property.SetRepresentationToSurface()
+            starfield_property.SetAmbient(1.0)  # Fully ambient (self-illuminated)
+            starfield_property.SetDiffuse(0.0)  # No diffuse lighting
+            starfield_property.SetSpecular(0.0)  # No specular highlights
+            
+            # Render on the inside of the sphere
+            starfield_property.BackfaceCullingOff()
+            starfield_property.FrontfaceCullingOn()
+            
+            # Add to renderer with lowest priority (renders first, behind everything)
+            self.starfield_actor.SetVisibility(True)
+            self.renderer.AddActor(self.starfield_actor)
+            
+            print(f"Starfield background created successfully (radius: {starfield_radius/1000:.0f}k km)")
+            return True
+            
+        except Exception as e:
+            print(f"Error creating starfield background: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def add_starfield_texture_coordinates(self, sphere_data):
+        """Add texture coordinates for starfield mapping"""
+        try:
+            points = sphere_data.GetPoints()
+            num_points = points.GetNumberOfPoints()
+            
+            # Create texture coordinate array
+            tex_coords = vtk.vtkFloatArray()
+            tex_coords.SetNumberOfComponents(2)
+            tex_coords.SetNumberOfTuples(num_points)
+            tex_coords.SetName("StarfieldTextureCoordinates")
+            
+            for i in range(num_points):
+                point = points.GetPoint(i)
+                x, y, z = point
+                
+                # Convert to spherical coordinates
+                r = np.sqrt(x*x + y*y + z*z)
+                
+                if r > 0:
+                    # For star maps, we want standard equirectangular projection
+                    longitude = np.arctan2(y, x)  # -π to π
+                    latitude = np.arcsin(np.clip(z / r, -1.0, 1.0))  # -π/2 to π/2
+                    
+                    # Map to texture coordinates (0 to 1)
+                    u = (longitude + np.pi) / (2 * np.pi)  # 0 to 1
+                    v = (latitude + np.pi/2) / np.pi  # 0 to 1
+                    
+                    # Ensure coordinates are in valid range
+                    u = np.clip(u, 0.001, 0.999)
+                    v = np.clip(v, 0.001, 0.999)
+                else:
+                    u, v = 0.5, 0.5
+                
+                tex_coords.SetTuple2(i, u, v)
+            
+            sphere_data.GetPointData().SetTCoords(tex_coords)
+            print(f"Added starfield texture coordinates for {num_points} points")
+            
+        except Exception as e:
+            print(f"Error adding starfield texture coordinates: {e}")
+    
+    def load_starfield_texture(self):
+        """Load starfield texture from common star map files"""
+        try:
+            # List of possible starfield texture files
+            starfield_files = [
+                "starfield.jpg", "starfield.png", "star_map.jpg", "star_map.png",
+                "stars.jpg", "stars.png", "milky_way.jpg", "milky_way.png",
+                "celestial_sphere.jpg", "celestial_sphere.png", "night_sky.jpg",
+                "starmap_4k.jpg", "starmap_8k.jpg", "starmap.jpg",
+                "eso_milky_way.jpg", "hubble_starfield.jpg"
+            ]
+            
+            # Try to find and load a starfield texture
+            for filename in starfield_files:
+                texture = self.try_load_starfield_file(filename)
+                if texture:
+                    print(f"Successfully loaded starfield texture: {filename}")
+                    return texture
+            
+            print("No starfield texture file found, creating procedural starfield...")
+            return self.create_procedural_starfield_texture()
+            
+        except Exception as e:
+            print(f"Error loading starfield texture: {e}")
+            return None
+    
+    def try_load_starfield_file(self, filename):
+        """Try to load a specific starfield texture file"""
+        try:
+            import os
+            
+            if not os.path.exists(filename):
+                return None
+            
+            # Create appropriate reader
+            if filename.lower().endswith(('.jpg', '.jpeg')):
+                reader = vtk.vtkJPEGReader()
+            elif filename.lower().endswith('.png'):
+                reader = vtk.vtkPNGReader()
+            else:
+                return None
+            
+            reader.SetFileName(filename)
+            reader.Update()
+            
+            # Check if image loaded
+            if reader.GetOutput().GetNumberOfPoints() == 0:
+                return None
+            
+            # Create texture
+            texture = vtk.vtkTexture()
+            texture.SetInputConnection(reader.GetOutputPort())
+            texture.InterpolateOn()
+            texture.RepeatOff()
+            texture.EdgeClampOn()
+            texture.SetWrap(vtk.vtkTexture.ClampToEdge)
+            
+            return texture
+            
+        except Exception as e:
+            print(f"Error loading starfield file {filename}: {e}")
+            return None
+    
+    def create_procedural_starfield_texture(self):
+        """Create a procedural starfield texture"""
+        try:
+            print("Creating procedural starfield texture...")
+            
+            # Create high-resolution starfield
+            width, height = 2048, 1024  # Equirectangular format
+            
+            # Create image data
+            image = vtk.vtkImageData()
+            image.SetDimensions(width, height, 1)
+            image.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 3)  # RGB
+            
+            # Generate realistic starfield
+            import random
+            random.seed(42)  # Reproducible starfield
+            
+            # Background space color (very dark blue-black)
+            bg_color = [5, 5, 15]
+            
+            # Fill background
+            for y in range(height):
+                for x in range(width):
+                    image.SetScalarComponentFromFloat(x, y, 0, 0, bg_color[0])
+                    image.SetScalarComponentFromFloat(x, y, 0, 1, bg_color[1])
+                    image.SetScalarComponentFromFloat(x, y, 0, 2, bg_color[2])
+            
+            # Add stars with realistic distribution
+            num_stars = 8000  # Dense starfield
+            
+            for _ in range(num_stars):
+                # Random position
+                x = random.randint(0, width - 1)
+                y = random.randint(0, height - 1)
+                
+                # Star magnitude (brightness) - weighted toward dimmer stars
+                magnitude = random.random() ** 3  # Cube for realistic distribution
+                
+                # Star color - most stars are white/blue-white, some yellow/red
+                color_type = random.random()
+                if color_type < 0.7:  # Blue-white stars (most common)
+                    base_color = [200, 210, 255]
+                elif color_type < 0.9:  # Yellow stars (like our Sun)
+                    base_color = [255, 245, 200]
+                else:  # Red stars
+                    base_color = [255, 200, 150]
+                
+                # Apply magnitude
+                star_color = [int(c * magnitude) for c in base_color]
+                star_color = [max(0, min(255, c)) for c in star_color]
+                
+                # Set star pixel
+                image.SetScalarComponentFromFloat(x, y, 0, 0, star_color[0])
+                image.SetScalarComponentFromFloat(x, y, 0, 1, star_color[1])
+                image.SetScalarComponentFromFloat(x, y, 0, 2, star_color[2])
+                
+                # Add some bright stars with glow
+                if magnitude > 0.95:
+                    for dx in [-1, 0, 1]:
+                        for dy in [-1, 0, 1]:
+                            gx, gy = x + dx, y + dy
+                            if 0 <= gx < width and 0 <= gy < height:
+                                glow_intensity = 0.3 * magnitude
+                                current_r = image.GetScalarComponentAsFloat(gx, gy, 0, 0)
+                                current_g = image.GetScalarComponentAsFloat(gx, gy, 0, 1)
+                                current_b = image.GetScalarComponentAsFloat(gx, gy, 0, 2)
+                                
+                                new_r = min(255, current_r + star_color[0] * glow_intensity)
+                                new_g = min(255, current_g + star_color[1] * glow_intensity)
+                                new_b = min(255, current_b + star_color[2] * glow_intensity)
+                                
+                                image.SetScalarComponentFromFloat(gx, gy, 0, 0, new_r)
+                                image.SetScalarComponentFromFloat(gx, gy, 0, 1, new_g)
+                                image.SetScalarComponentFromFloat(gx, gy, 0, 2, new_b)
+            
+            # Add some nebulosity (faint background glow)
+            for _ in range(50):
+                center_x = random.randint(0, width - 1)
+                center_y = random.randint(0, height - 1)
+                nebula_radius = random.randint(20, 100)
+                nebula_intensity = random.random() * 0.1
+                
+                # Nebula color (faint blue/purple)
+                nebula_color = [20, 30, 60]
+                
+                for dx in range(-nebula_radius, nebula_radius):
+                    for dy in range(-nebula_radius, nebula_radius):
+                        nx, ny = center_x + dx, center_y + dy
+                        if 0 <= nx < width and 0 <= ny < height:
+                            distance = np.sqrt(dx*dx + dy*dy)
+                            if distance < nebula_radius:
+                                fade = (1.0 - distance / nebula_radius) * nebula_intensity
+                                
+                                current_r = image.GetScalarComponentAsFloat(nx, ny, 0, 0)
+                                current_g = image.GetScalarComponentAsFloat(nx, ny, 0, 1)
+                                current_b = image.GetScalarComponentAsFloat(nx, ny, 0, 2)
+                                
+                                new_r = min(255, current_r + nebula_color[0] * fade)
+                                new_g = min(255, current_g + nebula_color[1] * fade)
+                                new_b = min(255, current_b + nebula_color[2] * fade)
+                                
+                                image.SetScalarComponentFromFloat(nx, ny, 0, 0, new_r)
+                                image.SetScalarComponentFromFloat(nx, ny, 0, 1, new_g)
+                                image.SetScalarComponentFromFloat(nx, ny, 0, 2, new_b)
+            
+            # Create texture
+            texture = vtk.vtkTexture()
+            texture.SetInputData(image)
+            texture.InterpolateOn()
+            texture.RepeatOff()
+            texture.EdgeClampOn()
+            
+            print("Procedural starfield texture created successfully")
+            return texture
+            
+        except Exception as e:
+            print(f"Error creating procedural starfield: {e}")
+            return None
+    
+    def apply_procedural_starfield_material(self):
+        """Apply a simple dark material if no texture is available"""
+        try:
+            # Very dark space color with slight blue tint
+            self.starfield_actor.GetProperty().SetColor(0.02, 0.02, 0.08)
+            print("Applied simple dark space material")
+            
+        except Exception as e:
+            print(f"Error applying starfield material: {e}")
+    
+    def download_starfield_instructions(self):
+        """Print instructions for downloading high-quality star maps"""
+        print("""
+To get high-quality star map textures, you can download from:
+
+1. ESA/Gaia Star Map:
+   https://www.cosmos.esa.int/web/gaia/data-release-3
+   
+2. NASA Hubble Legacy Archive:
+   https://hla.stsci.edu/
+   
+3. Free star map textures:
+   - https://www.solarsystemscope.com/textures/ (8K star maps)
+   - http://planetpixelemporium.com/planets.html (Free celestial textures)
+   - https://svs.gsfc.nasa.gov/cgi-bin/search.cgi (NASA visualizations)
+
+4. Hipparcos Star Catalog visualizations:
+   - https://www.cosmos.esa.int/web/hipparcos
+
+Save the image as 'starfield.jpg' or 'star_map.jpg' in the same directory.
+For best results, use equirectangular projection (2:1 aspect ratio).
+Recommended resolution: 4K (4096x2048) or higher.
+        """)
+        
     def create_earth_representation(self):
         """Create Earth - MODIFIED to not auto-create grid"""
         print("Creating Earth (without automatic grid)...")
@@ -1088,7 +1451,7 @@ class ElectronFluxVisualizer(QMainWindow):
             return False
 
     def create_earth_opacity_control(self, parent_layout):
-        """Create Earth opacity control with lat/long grid and hide orbital paths checkboxes"""
+        """Create Earth opacity control with lat/long grid, hide orbital paths, and starfield checkboxes"""
         try:
             # Create opacity control widget
             opacity_widget = QWidget()
@@ -1127,12 +1490,22 @@ class ElectronFluxVisualizer(QMainWindow):
             # Add some space between checkboxes
             opacity_layout.addSpacing(10)
             
-            # Add checkbox for hiding orbital paths (NEW)
+            # Add checkbox for hiding orbital paths
             self.hide_orbital_paths = QCheckBox("Hide Orbital Paths")
             self.hide_orbital_paths.setChecked(False)  # Default unchecked (paths visible)
             self.hide_orbital_paths.setStyleSheet("color: white; font-weight: bold;")
             self.hide_orbital_paths.stateChanged.connect(self.toggle_orbital_paths)
             opacity_layout.addWidget(self.hide_orbital_paths)
+            
+            # Add some space between checkboxes
+            opacity_layout.addSpacing(10)
+            
+            # Add checkbox for starfield background (NEW)
+            self.show_starfield = QCheckBox("Show Starfield")
+            self.show_starfield.setChecked(True)  # Default checked (starfield visible)
+            self.show_starfield.setStyleSheet("color: white; font-weight: bold;")
+            self.show_starfield.stateChanged.connect(self.toggle_starfield)
+            opacity_layout.addWidget(self.show_starfield)
             
             # Add final spacer to push everything left
             opacity_layout.addStretch()
@@ -1182,10 +1555,37 @@ class ElectronFluxVisualizer(QMainWindow):
             # Add to parent layout
             parent_layout.addWidget(opacity_widget)
             
-            print("Earth opacity control with lat/long grid and hide orbital paths checkboxes created successfully")
+            print("Earth opacity control with lat/long grid, hide orbital paths, and starfield checkboxes created successfully")
             
         except Exception as e:
             print(f"Error creating Earth opacity control: {e}")
+    
+    def toggle_starfield(self, state):
+        """Toggle starfield background visibility"""
+        try:
+            show_starfield = state == 2  # Qt.Checked = 2
+            
+            print(f"Toggling starfield: {'ON' if show_starfield else 'OFF'}")
+            
+            if hasattr(self, 'starfield_actor') and self.starfield_actor:
+                self.starfield_actor.SetVisibility(show_starfield)
+                print(f"Starfield visibility: {show_starfield}")
+            elif show_starfield:
+                # Create starfield if it doesn't exist
+                print("Creating starfield on demand...")
+                self.create_starfield_background()
+            
+            # Force render
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+                
+            status = "visible" if show_starfield else "hidden"
+            print(f"Starfield is now {status}")
+                
+        except Exception as e:
+            print(f"Error toggling starfield: {e}")
+            import traceback
+            traceback.print_exc()
 
     def toggle_orbital_paths(self, state):
         """Toggle orbital path visibility"""
