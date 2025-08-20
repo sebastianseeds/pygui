@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>van_allen_flux_calculation</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+  </style>
+  <script
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
+  type="text/javascript"></script>
+</head>
+<body>
+<h1
+id="how-the-van-allen-belt-flux-is-calculated-for-each-grid-point">How
+the Van Allen Belt Flux is Calculated for Each Grid Point</h1>
+<h1 id="used-in-generate_sample_data.py">Used in
+generate_sample_data.py</h1>
+<p>This is a step by step explanation of the function
+<code>van_allen_belt_model(x, y, z)</code>, describing how it computes
+the flux value for a single point in space.</p>
+<hr />
+<h2 id="constants">1. Constants</h2>
+<ul>
+<li>Earth radius: <strong>Rₑ = 6371 km</strong></li>
+<li>Magnetic dipole tilt: <strong>θ = 11°</strong></li>
+<li>Noise and background (applied at the end):
+<ul>
+<li>Multiply flux by ( 1 + 0.1,(0,1) ) (clipped to ≥ 0.1)</li>
+<li>Add a random offset ( (0, 10^4) )</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="rotate-into-magnetic-coordinates">2. Rotate into Magnetic
+Coordinates</h2>
+<p>Incoming coordinates are geographic (rotation-axis aligned). They are
+rotated into magnetic coordinates:</p>
+[
+<span class="math display">\[\begin{aligned}
+x_{mag} &amp;= x \cos\theta + z \sin\theta \\
+y_{mag} &amp;= y \\
+z_{mag} &amp;= -x \sin\theta + z \cos\theta
+\end{aligned}\]</span>
+<p>]</p>
+<hr />
+<h2 id="magnetic-geometry-and-l-shell">3. Magnetic Geometry and
+L-Shell</h2>
+<p>From the rotated coordinates:</p>
+[
+<span class="math display">\[\begin{aligned}
+r_{mag} &amp;= \sqrt{x_{mag}^2 + y_{mag}^2 + z_{mag}^2} \\
+\lambda &amp;= \arcsin\left(\frac{|z_{mag}|}{r_{mag}}\right) \\
+L &amp;= \frac{r_{mag}}{R_E \cos^2 \lambda}
+\end{aligned}\]</span>
+<p>]</p>
+<p>If ( r_{mag} R_E ), the point is inside Earth → <strong>flux =
+0</strong>.</p>
+<hr />
+<h2 id="flux-contributions">4. Flux Contributions</h2>
+<p>Flux is computed as the sum of several Gaussian components:</p>
+<h3 id="inner-belt-l-1.22.8">Inner Belt (L = 1.2–2.8)</h3>
+<p>[ flux ;{+}{=} 2^7; e<sup>{-(L-1.6)</sup>2 / (2(0.4)^2)} ; (1 + 2^2 )
+]</p>
+<h3 id="slot-region-l-2.53.2">Slot Region (L = 2.5–3.2)</h3>
+<p>[ flux ;{+}{=} 10^5 ; e<sup>{-(L-2.8)</sup>2 / (2(0.2)^2)} ]</p>
+<h3 id="outer-belt-l-3.08.0">Outer Belt (L = 3.0–8.0)</h3>
+<p>[ flux ;{+}{=} 10^7 ; e<sup>{-(L-4.5)</sup>2 / (2(1.2)^2)} (1 + 1.5
+^2 )(1 + 0.3 ) ]</p>
+<p>where ( = (y_{mag}, x_{mag}) ).</p>
+<h3 id="plasma-sheet-tail-l-6">Plasma Sheet Tail (L &gt; 6)</h3>
+<p>[ flux ;{+}{=} 5^5 ; e<sup>{-(L-8)</sup>2 / (2(2)^2)} ]</p>
+<hr />
+<h2 id="noise-and-background">5. Noise and Background</h2>
+<p>Finally, if flux &gt; 0:</p>
+[
+<span class="math display">\[\begin{aligned}
+flux &amp;\leftarrow flux \times \max(0.1, 1 + 0.1\,\mathcal{N}(0,1)) \\
+flux &amp;\leftarrow flux + \mathcal{U}(0, 10^4)
+\end{aligned}\]</span>
+<p>]</p>
+<p>This ensures every point has at least a small nonzero value.</p>
+<hr />
+<h2 id="worked-example">6. Worked Example</h2>
+<p>Point: ( (x,y,z) = (2R_E, 0, 0) = (12742, 0, 0) ; km )</p>
+<p><strong>Step 1. Rotate into magnetic frame</strong></p>
+[
+<span class="math display">\[\begin{aligned}
+x_{mag} &amp;= 12742 \cos 11^\circ \approx 12508 \\
+y_{mag} &amp;= 0 \\
+z_{mag} &amp;= -12742 \sin 11^\circ \approx -2431
+\end{aligned}\]</span>
+<p>]</p>
+<p><strong>Step 2. Geometry</strong></p>
+<p>[ r_{mag} = 12742, = (2431/12742) = 11^, L = 2.08 ]</p>
+<p><strong>Step 3. Flux contributions</strong></p>
+<ul>
+<li>Inner belt is active:<br />
+( flux ^7 )<br />
+</li>
+<li>Slot region: none (L &lt; 2.5)<br />
+</li>
+<li>Outer belt: none (L &lt; 3)<br />
+</li>
+<li>Plasma sheet: none (L &lt; 6)</li>
+</ul>
+<p><strong>Step 4. Noise + background</strong></p>
+<p>Apply random multiplier (≈1.003) and random offset (≈4389).</p>
+<p>Final flux ≈ <strong>1.09 × 10⁷</strong> (dimensionless
+intensity).</p>
+<hr />
+<h2 id="important-note-on-units">7. Important Note on Units</h2>
+<ul>
+<li>The script uses arbitrary amplitudes (so no reference spectra, no
+calibrations, and arbitrary units).<br />
+</li>
+<li>Output is for visualization purposes only.</li>
+</ul>
+</body>
+</html>

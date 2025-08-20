@@ -324,26 +324,26 @@ class SpectrumPlotWindow(QMainWindow):
             print(f"Error updating spectrum: {e}")
             self.info_label.setText(f"Error updating spectrum: {e}")
     
-    def update_spectrum(self, energy_bins=None, spectrum_data=None):
-        """Legacy method for compatibility - redirects to satellite-based update"""
-        if energy_bins is not None and spectrum_data is not None:
-            # Direct spectrum data provided
-            try:
-                self.spectrum_line.set_xdata(energy_bins)
-                self.spectrum_line.set_ydata(spectrum_data)
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.canvas.draw_idle()
-                self.info_label.setText(f"Updated with {len(spectrum_data)} energy bins")
-            except:
-                pass
-        else:
-            # Use satellite position
-            self.update_spectrum_from_satellite_position()
+    # def update_spectrum(self, energy_bins=None, spectrum_data=None):
+    #     """Legacy method for compatibility - redirects to satellite-based update"""
+    #     if energy_bins is not None and spectrum_data is not None:
+    #         # Direct spectrum data provided
+    #         try:
+    #             self.spectrum_line.set_xdata(energy_bins)
+    #             self.spectrum_line.set_ydata(spectrum_data)
+    #             self.ax.relim()
+    #             self.ax.autoscale_view()
+    #             self.canvas.draw_idle()
+    #             self.info_label.setText(f"Updated with {len(spectrum_data)} energy bins")
+    #         except:
+    #             pass
+    #     else:
+    #         # Use satellite position
+    #         self.update_spectrum_from_satellite_position()
     
-    def closeEvent(self, event):
-        """Handle window close event"""
-        event.accept()
+    # def closeEvent(self, event):
+    #     """Handle window close event"""
+    #     event.accept()
 
 class FluxTimePlotWindow(QMainWindow):
     """Window for flux vs time plotting"""
@@ -1532,7 +1532,7 @@ Recommended resolution: 4K (4096x2048) or higher.
                     border-radius: 8px;
                 }
                 QSlider::handle:horizontal:hover {
-                    background: #aaa;
+                    background: #5C6A72;
                 }
                 QCheckBox::indicator {
                     width: 16px;
@@ -2380,7 +2380,25 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         
         if readded_grid_count > 0:
             print(f"Re-added {readded_grid_count} lat/long grid actors")
-        
+
+    def _get_multi_iso_levels(self):
+        levels = []
+        if hasattr(self, 'multi_iso_controls'):
+            for cb, slider, _ in self.multi_iso_controls:
+                if cb.isChecked():
+                    levels.append(slider.value())
+        return levels
+
+    def update_multi_isosurface_controls(self, *args):
+        # Only rebuild when in Wireframe & Multiple Isosurface
+        if (hasattr(self, 'viz_mode_combo') and self.viz_mode_combo.currentText() == "Wireframe" and
+            hasattr(self, 'wireframe_style_combo') and self.wireframe_style_combo.currentText() == "Multiple Isosurface" and
+            hasattr(self, 'vtk_data') and self.vtk_data):
+            self.clear_field_visualization()
+            self.setup_wireframe_rendering()
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+            
     def setup_visualization_controls(self):
         """Enhanced controls with volume threshold control integrated below mode selector"""
 
@@ -2440,14 +2458,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         # Label below the slider (centered)
         self.volume_threshold_label = QLabel("90th percentile")
         self.volume_threshold_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
-        self.volume_threshold_label.setStyleSheet("color: #ddd; font-size: 11px; margin-top: 2px;")
+        self.volume_threshold_label.setStyleSheet("color: #5C6A72; font-size: 11px; margin-top: 2px;")
         volume_layout.addWidget(self.volume_threshold_label)
 
         # Add explanation text (more compact since we have more space)
         explanation_label = QLabel(
             "Dual-scale: 0-50% = 1st-90th percentile | 50-100% = 90th-99.9th percentile"
         )
-        explanation_label.setStyleSheet("color: #aaa; font-size: 9px; margin-top: 5px;")
+        explanation_label.setStyleSheet("color: #5C6A72; font-size: 9px; margin-top: 5px;")
         explanation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         explanation_label.setWordWrap(True)
         volume_layout.addWidget(explanation_label)
@@ -2472,6 +2490,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.point_density_slider.valueChanged.connect(self.update_point_density)
         self.point_density_label = QLabel("5,000 points")
         self.point_density_label.setMinimumWidth(100)
+        self.point_density_label.setStyleSheet("color: #5C6A72;")
         density_row.addWidget(self.point_density_slider)
         density_row.addWidget(self.point_density_label)
         pc_layout.addRow(density_row)
@@ -2485,6 +2504,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.point_size_slider.valueChanged.connect(self.update_point_size)
         self.point_size_label = QLabel("400m radius")
         self.point_size_label.setMinimumWidth(100)
+        self.point_size_label.setStyleSheet("color: #5C6A72;")
         point_size_row.addWidget(self.point_size_slider)
         point_size_row.addWidget(self.point_size_label)
         pc_layout.addRow(point_size_row)
@@ -2499,7 +2519,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
 
         # Wireframe style selector (keep existing)
         style_row = QHBoxLayout()
-        style_row.addWidget(QLabel("Wireframe Style:"))
+        style_row.addWidget(QLabel("Isosurface Style:"))
         self.wireframe_style_combo = QComboBox()
         self.wireframe_style_combo.addItems([
             "Single Isosurface",
@@ -2510,19 +2530,31 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         style_row.addWidget(self.wireframe_style_combo)
         wireframe_layout.addRow(style_row)
 
-        # Wireframe Color Mode Control (NEW)
-        color_mode_row = QHBoxLayout()
-        color_mode_row.addWidget(QLabel("Color Mode:"))
-        self.wireframe_color_mode_combo = QComboBox()
-        self.wireframe_color_mode_combo.addItems([
-            "Solid Color",
-            "Color by Flux Value"
-        ])
-        self.wireframe_color_mode_combo.setCurrentText("Color by Flux Value")
-        self.wireframe_color_mode_combo.currentTextChanged.connect(self.change_wireframe_color_mode)
-        color_mode_row.addWidget(self.wireframe_color_mode_combo)
-        wireframe_layout.addRow(color_mode_row)
-
+        # Multiple Isosurface Controls (replaces Color Mode)
+        multi_row = QVBoxLayout()
+        self.multi_iso_controls = []
+        default_percents = [20, 40, 60, 80]
+        for idx, pct in enumerate(default_percents, start=1):
+            row = QHBoxLayout()
+            cb = QCheckBox(f"Isosurface {idx}")
+            cb.setChecked(True)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(10, 90)
+            slider.setValue(pct)
+            value_label = QLabel(f"{pct}th %")
+            value_label.setMinimumWidth(60)
+            value_label.setStyleSheet("color: #5C6A72;")
+            # Store and wire signals
+            self.multi_iso_controls.append((cb, slider, value_label))
+            slider.valueChanged.connect(lambda v, lbl=value_label: lbl.setText(f"{v}th %"))
+            cb.stateChanged.connect(self.update_multi_isosurface_controls)
+            slider.valueChanged.connect(self.update_multi_isosurface_controls)
+            row.addWidget(cb)
+            row.addWidget(slider)
+            row.addWidget(value_label)
+            multi_row.addLayout(row)
+        wireframe_layout.addRow(multi_row)
+            
         # Isosurface Level Slider (updated to match volume controls style)
         self.isosurface_controls = QWidget()
         iso_layout = QVBoxLayout(self.isosurface_controls)  # Changed from QFormLayout to QVBoxLayout
@@ -2544,7 +2576,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         # Label below the slider (centered like volume threshold) - CLARIFIED PERCENTILE
         self.isosurface_level_label = QLabel("50th flux percentile")
         self.isosurface_level_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
-        self.isosurface_level_label.setStyleSheet("color: #ddd; font-size: 11px; margin-top: 2px;")
+        self.isosurface_level_label.setStyleSheet("color: #5C6A72; font-size: 11px; margin-top: 2px;")
         iso_layout.addWidget(self.isosurface_level_label)
 
         # Add some spacing
@@ -2584,6 +2616,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.slice_position_slider.valueChanged.connect(self.update_slice_position)
         self.slice_position_label = QLabel("Center (0 km)")
         self.slice_position_label.setMinimumWidth(120)
+        self.slice_position_label.setStyleSheet("color: #5C6A72;")
         slice_pos_row.addWidget(self.slice_position_slider)
         slice_pos_row.addWidget(self.slice_position_label)
         slice_layout.addRow(slice_pos_row)
@@ -2604,6 +2637,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.opacity_slider.valueChanged.connect(self.update_opacity)
         self.opacity_label = QLabel("70%")
         self.opacity_label.setMinimumWidth(50)
+        self.opacity_label.setStyleSheet("color: #5C6A72;")
         opacity_row.addWidget(self.opacity_slider)
         opacity_row.addWidget(self.opacity_label)
         permanent_layout.addRow(opacity_row)
@@ -2619,7 +2653,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         cutoff_row.addWidget(self.flux_cutoff_edit)
 
         units_label = QLabel("particles/cm²/s")
-        units_label.setStyleSheet("color: #ccc; font-size: 10px;")
+        units_label.setStyleSheet("color: #5C6A72; font-size: 10px;")
         cutoff_row.addWidget(units_label)
         cutoff_row.addStretch()
         permanent_layout.addRow(cutoff_row)
@@ -2678,30 +2712,30 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.setup_wireframe_rendering()
             self.vtk_widget.GetRenderWindow().Render()
             
-    def test_dual_scale_mapping(self):
-        """Test method to verify dual-scale mapping is correct"""
-        print("=== TESTING DUAL-SCALE MAPPING ===")
+    # def test_dual_scale_mapping(self):
+    #     """Test method to verify dual-scale mapping is correct"""
+    #     print("=== TESTING DUAL-SCALE MAPPING ===")
 
-        test_values = [0, 25, 50, 75, 100]
+    #     test_values = [0, 25, 50, 75, 100]
 
-        for value in test_values:
-            if value <= 50:
-                percentile = 1 + (value / 50.0) * 89
-                expected_desc = f"broad range: 1st-90th"
-            else:
-                normalized = (value - 50) / 50.0
-                percentile = 90 + normalized * 9.9
-                expected_desc = f"high-res range: 90th-99.9th"
+    #     for value in test_values:
+    #         if value <= 50:
+    #             percentile = 1 + (value / 50.0) * 89
+    #             expected_desc = f"broad range: 1st-90th"
+    #         else:
+    #             normalized = (value - 50) / 50.0
+    #             percentile = 90 + normalized * 9.9
+    #             expected_desc = f"high-res range: 90th-99.9th"
 
-            print(f"Slider {value}% -> {percentile:.1f}th percentile ({expected_desc})")
+    #         print(f"Slider {value}% -> {percentile:.1f}th percentile ({expected_desc})")
 
-        print("Expected behavior:")
-        print("  0% -> 1st percentile")
-        print(" 25% -> 45th percentile") 
-        print(" 50% -> 90th percentile (TRANSITION POINT)")
-        print(" 75% -> 95th percentile")
-        print("100% -> 99.9th percentile")
-        print("=== TEST COMPLETE ===")
+    #     print("Expected behavior:")
+    #     print("  0% -> 1st percentile")
+    #     print(" 25% -> 45th percentile") 
+    #     print(" 50% -> 90th percentile (TRANSITION POINT)")
+    #     print(" 75% -> 95th percentile")
+    #     print("100% -> 99.9th percentile")
+    #     print("=== TEST COMPLETE ===")
             
     def update_flux_cutoff_from_text(self):
         """Update flux cutoff - with better default"""
@@ -2735,24 +2769,24 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             # Reset to previous valid value
             self.flux_cutoff_edit.setText(f"{self.current_flux_cutoff:.2e}")
 
-    def get_effective_scalar_range(self):
-        """Get scalar range with flux cutoff applied"""
-        if not hasattr(self, 'vtk_data') or not self.vtk_data:
-            return (0, 1)
+    # def get_effective_scalar_range(self):
+    #     """Get scalar range with flux cutoff applied"""
+    #     if not hasattr(self, 'vtk_data') or not self.vtk_data:
+    #         return (0, 1)
 
-        # Get raw scalar range
-        raw_range = self.vtk_data.GetScalarRange()
+    #     # Get raw scalar range
+    #     raw_range = self.vtk_data.GetScalarRange()
 
-        # Apply cutoff to minimum
-        cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
-        effective_min = max(raw_range[0], cutoff)
-        effective_max = raw_range[1]
+    #     # Apply cutoff to minimum
+    #     cutoff = getattr(self, 'current_flux_cutoff', 1e-5)
+    #     effective_min = max(raw_range[0], cutoff)
+    #     effective_max = raw_range[1]
 
-        # Ensure we have a valid range
-        if effective_min >= effective_max:
-            effective_min = effective_max * 0.001  # Use 0.1% of max as minimum
+    #     # Ensure we have a valid range
+    #     if effective_min >= effective_max:
+    #         effective_min = effective_max * 0.001  # Use 0.1% of max as minimum
 
-        return (effective_min, effective_max)
+    #     return (effective_min, effective_max)
 
     def change_scale_mode(self, scale_mode):
         """Change scale mode with debugging and volume rendering support"""
@@ -2865,6 +2899,25 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Setting mapper range to effective range: {effective_range}")
             mapper.SetScalarRange(effective_range[0], effective_range[1])
             mapper.SetLookupTable(lut)
+
+            # ALSO update multiple isosurface (wireframe) actors with the effective range/LUT
+            if hasattr(self, 'wireframe_actors'):
+                for actor in self.wireframe_actors:
+                    if actor:
+                        wm = actor.GetMapper()
+                        if wm:
+                            wm.SetScalarRange(effective_range[0], effective_range[1])
+                            wm.SetLookupTable(lut)
+
+            # ALSO update multiple isosurface (wireframe) actors with the effective range/LUT
+            if hasattr(self, 'wireframe_actors'):
+                for actor in self.wireframe_actors:
+                    if actor:
+                        wm = actor.GetMapper()
+                        if wm:
+                            wm.SetScalarRange(effective_range[0], effective_range[1])
+                            wm.SetLookupTable(lut)
+
             
             # Update scalar bar with effective range
             if hasattr(self, 'scalar_bar') and self.scalar_bar:
@@ -3103,6 +3156,23 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                 if hasattr(self, 'slice_actors') and self.slice_actors:
                     print(f"Updated {len(self.slice_actors)} slice actors colormap")
 
+            # Update wireframe (multiple isosurface) mappers to the new LUT
+            if hasattr(self, 'wireframe_actors'):
+                # Determine EFFECTIVE range for consistency with current scale
+                cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
+                original_range = getattr(self, 'current_scalar_range',
+                                             self.vtk_data.GetScalarRange() if self.vtk_data else (1e-8, 1))
+                effective_min = max(original_range[0], cutoff)
+                effective_max = max(original_range[1], effective_min * 1.0001)
+                effective_range = (effective_min, effective_max)
+
+                for actor in self.wireframe_actors:
+                    if actor:
+                        wm = actor.GetMapper()
+                        if wm:
+                            wm.SetLookupTable(new_lut)
+                            wm.SetScalarRange(effective_range[0], effective_range[1])
+
             # Update wireframe actors (if they use colormaps)
             if hasattr(self, 'wireframe_actors'):
                 for actor in self.wireframe_actors:
@@ -3275,21 +3345,39 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self._density_update_timer.start(200)
 
     def change_wireframe_style(self, style_name):
-        """FIXED: Clear previous wireframe when style changes"""
-        print(f"Changing wireframe style to: {style_name}")
-        
-        # Show/hide isosurface controls
-        show_iso_controls = (style_name == "Single Isosurface")
+        """Clear and rebuild wireframe/isoviz when the style changes."""
+        print(f"[WF] Style changed to: {style_name}")
+
+        # Show/hide isosurface controls (only for Single Isosurface)
         if hasattr(self, 'isosurface_controls'):
-            self.isosurface_controls.setVisible(show_iso_controls)
-        
-        if self.viz_mode_combo.currentText() == "Wireframe" and self.vtk_data:
-            # IMPORTANT: Clear previous wireframe first
+            self.isosurface_controls.setVisible(style_name == "Single Isosurface")
+
+        if not self.vtk_data:
+            print("[WF] No vtk_data; ignoring style change.")
+            return
+
+        mode = self.viz_mode_combo.currentText() if hasattr(self, 'viz_mode_combo') else ""
+        print(f"[WF] Current viz mode: {mode}")
+
+        # Rebuild when we are in Wireframe mode.
+        if mode == "Wireframe":
+            print("[WF] Rebuilding wireframe…")
             self.clear_field_visualization()
-            
-            # Create new wireframe with new style
             self.setup_wireframe_rendering()
-            self.vtk_widget.GetRenderWindow().Render()
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+            return
+
+        # Keep existing behavior for isosurface mode
+        if mode in ("Isosurface", "Isosurfaces"):
+            print("[WF] Rebuilding isosurfaces…")
+            self.clear_field_visualization()
+            self.setup_wireframe_rendering()
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+            return
+
+        print(f"[WF] Style change ignored for mode: {mode}")
 
     def update_isosurface_level(self, level_percent):
         """COMPACT: Update isosurface level with percentile clarification"""
@@ -3349,11 +3437,11 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.setup_wireframe_rendering()
         self.vtk_widget.GetRenderWindow().Render()
             
-    def _update_isosurface(self):
-        """Actually update the isosurface"""
-        self.clear_field_visualization()
-        self.setup_wireframe_rendering()
-        self.vtk_widget.GetRenderWindow().Render()
+    # def _update_isosurface(self):
+    #     """Actually update the isosurface"""
+    #     self.clear_field_visualization()
+    #     self.setup_wireframe_rendering()
+    #     self.vtk_widget.GetRenderWindow().Render()
 
     def change_slice_axis(self, axis_text):
         """FIXED: Clear previous slice when axis changes"""
@@ -3461,11 +3549,11 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         self.setup_slice_planes()
         self.vtk_widget.GetRenderWindow().Render()
 
-    def _update_slice(self):
-        """Actually update the slice"""
-        self.clear_field_visualization()
-        self.setup_slice_planes()
-        self.vtk_widget.GetRenderWindow().Render()
+    # def _update_slice(self):
+    #     """Actually update the slice"""
+    #     self.clear_field_visualization()
+    #     self.setup_slice_planes()
+    #     self.vtk_widget.GetRenderWindow().Render()
             
     def update_point_size(self, value):
         """COMPACT: Update point size with simple labeling"""
@@ -3603,7 +3691,7 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
     def update_point_size(self, value):
         """Update point size for point cloud visualization"""
         radius_m = value  # Slider value is in meters
-        self.point_size_label.setText(f"{radius_m}m")
+        self.point_size_label.setText(f"{radius_m}m radius")
         
         # Only update if we're in point cloud mode and have a field actor
         if (self.viz_mode_combo.currentText() == "Point Cloud" and 
@@ -3654,22 +3742,22 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.create_point_cloud_glyphs(self.current_final_data, radius_m)
             self.vtk_widget.GetRenderWindow().Render()
 
-    def update_threshold_display(self):
-        """Update threshold labels without applying"""
-        min_val = self.threshold_min_slider.value()
-        max_val = self.threshold_max_slider.value()
-        self.threshold_min_label.setText(f"{min_val}%")
-        self.threshold_max_label.setText(f"{max_val}%")
+    # def update_threshold_display(self):
+    #     """Update threshold labels without applying"""
+    #     min_val = self.threshold_min_slider.value()
+    #     max_val = self.threshold_max_slider.value()
+    #     self.threshold_min_label.setText(f"{min_val}%")
+    #     self.threshold_max_label.setText(f"{max_val}%")
 
-    def apply_threshold_filter(self):
-        """Apply threshold filter to current visualization"""
-        if self.viz_mode_combo.currentText() == "Point Cloud":
-            # For point cloud, just update with current threshold
-            current_size = self.point_size_slider.value()
-            self.update_point_cloud_size(current_size)
-        else:
-            # For other modes, use existing threshold logic
-            self.update_threshold()
+    # def apply_threshold_filter(self):
+    #     """Apply threshold filter to current visualization"""
+    #     if self.viz_mode_combo.currentText() == "Point Cloud":
+    #         # For point cloud, just update with current threshold
+    #         current_size = self.point_size_slider.value()
+    #         self.update_point_cloud_size(current_size)
+    #     else:
+    #         # For other modes, use existing threshold logic
+    #         self.update_threshold()
 
 
     def apply_volume_threshold(self, flux_threshold):
@@ -3840,69 +3928,69 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print(f"Error calculating flux from percentile: {e}")
             return 1e-6
 
-    def calculate_extended_volume_percentiles(self):
-        """Calculate extended percentiles (10th, 25th, 50th, 75th, 90th, 95th, 99th) for smooth interpolation"""
-        try:
-            scalar_array = self.volume_data.GetPointData().GetScalars()
-            if not scalar_array:
-                return
+    # def calculate_extended_volume_percentiles(self):
+    #     """Calculate extended percentiles (10th, 25th, 50th, 75th, 90th, 95th, 99th) for smooth interpolation"""
+    #     try:
+    #         scalar_array = self.volume_data.GetPointData().GetScalars()
+    #         if not scalar_array:
+    #             return
 
-            import vtk.util.numpy_support as vtk_np
-            flux_values = vtk_np.vtk_to_numpy(scalar_array)
+    #         import vtk.util.numpy_support as vtk_np
+    #         flux_values = vtk_np.vtk_to_numpy(scalar_array)
 
-            # Remove zeros/background
-            non_zero_flux = flux_values[flux_values > 0]
+    #         # Remove zeros/background
+    #         non_zero_flux = flux_values[flux_values > 0]
 
-            if len(non_zero_flux) == 0:
-                return
+    #         if len(non_zero_flux) == 0:
+    #             return
 
-            # Calculate key percentiles for smooth interpolation
-            percentiles_to_calc = [10, 25, 50, 75, 90, 95, 99]
-            flux_percentiles = np.percentile(non_zero_flux, percentiles_to_calc)
+    #         # Calculate key percentiles for smooth interpolation
+    #         percentiles_to_calc = [10, 25, 50, 75, 90, 95, 99]
+    #         flux_percentiles = np.percentile(non_zero_flux, percentiles_to_calc)
 
-            # Store as dictionary for easy lookup
-            self.flux_percentiles = dict(zip(percentiles_to_calc, flux_percentiles))
+    #         # Store as dictionary for easy lookup
+    #         self.flux_percentiles = dict(zip(percentiles_to_calc, flux_percentiles))
 
-            print(f"Extended flux percentiles calculated: {self.flux_percentiles}")
+    #         print(f"Extended flux percentiles calculated: {self.flux_percentiles}")
 
-        except Exception as e:
-            print(f"Error calculating extended percentiles: {e}")
+    #     except Exception as e:
+    #         print(f"Error calculating extended percentiles: {e}")
 
-    def interpolate_flux_from_percentile(self, target_percentile):
-        """Interpolate flux value from percentile using stored percentile data"""
-        try:
-            if not hasattr(self, 'flux_percentiles'):
-                return self.flux_10th_percentile  # Fallback
+    # def interpolate_flux_from_percentile(self, target_percentile):
+    #     """Interpolate flux value from percentile using stored percentile data"""
+    #     try:
+    #         if not hasattr(self, 'flux_percentiles'):
+    #             return self.flux_10th_percentile  # Fallback
 
-            percentile_keys = sorted(self.flux_percentiles.keys())
+    #         percentile_keys = sorted(self.flux_percentiles.keys())
 
-            # Find the two percentiles that bracket our target
-            if target_percentile <= percentile_keys[0]:
-                return self.flux_percentiles[percentile_keys[0]]
-            elif target_percentile >= percentile_keys[-1]:
-                return self.flux_percentiles[percentile_keys[-1]]
-            else:
-                # Interpolate between two bracketing percentiles
-                for i in range(len(percentile_keys) - 1):
-                    lower_p = percentile_keys[i]
-                    upper_p = percentile_keys[i + 1]
+    #         # Find the two percentiles that bracket our target
+    #         if target_percentile <= percentile_keys[0]:
+    #             return self.flux_percentiles[percentile_keys[0]]
+    #         elif target_percentile >= percentile_keys[-1]:
+    #             return self.flux_percentiles[percentile_keys[-1]]
+    #         else:
+    #             # Interpolate between two bracketing percentiles
+    #             for i in range(len(percentile_keys) - 1):
+    #                 lower_p = percentile_keys[i]
+    #                 upper_p = percentile_keys[i + 1]
 
-                    if lower_p <= target_percentile <= upper_p:
-                        # Linear interpolation
-                        lower_flux = self.flux_percentiles[lower_p]
-                        upper_flux = self.flux_percentiles[upper_p]
+    #                 if lower_p <= target_percentile <= upper_p:
+    #                     # Linear interpolation
+    #                     lower_flux = self.flux_percentiles[lower_p]
+    #                     upper_flux = self.flux_percentiles[upper_p]
 
-                        fraction = (target_percentile - lower_p) / (upper_p - lower_p)
-                        interpolated_flux = lower_flux + fraction * (upper_flux - lower_flux)
+    #                     fraction = (target_percentile - lower_p) / (upper_p - lower_p)
+    #                     interpolated_flux = lower_flux + fraction * (upper_flux - lower_flux)
 
-                        return interpolated_flux
+    #                     return interpolated_flux
 
-            # Fallback
-            return self.flux_10th_percentile
+    #         # Fallback
+    #         return self.flux_10th_percentile
 
-        except Exception as e:
-            print(f"Error interpolating flux from percentile: {e}")
-            return self.flux_10th_percentile
+    #     except Exception as e:
+    #         print(f"Error interpolating flux from percentile: {e}")
+    #         return self.flux_10th_percentile
             
     def change_visualization_mode(self, mode):
         """Enhanced mode change with volume threshold control visibility"""
@@ -3963,31 +4051,31 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.setup_point_cloud_rendering()
             self.vtk_widget.GetRenderWindow().Render()
 
-    def update_volume_threshold_label(self):
-        """Update the transparency label to show threshold info for volume rendering"""
-        try:
-            if (hasattr(self, 'volume_actor') and self.volume_actor and 
-                self.viz_mode_combo.currentText() == "Volume Rendering"):
+    # def update_volume_threshold_label(self):
+    #     """Update the transparency label to show threshold info for volume rendering"""
+    #     try:
+    #         if (hasattr(self, 'volume_actor') and self.volume_actor and 
+    #             self.viz_mode_combo.currentText() == "Volume Rendering"):
 
-                # Change label to show it's a threshold, not transparency
-                slider_value = self.opacity_slider.value()
+    #             # Change label to show it's a threshold, not transparency
+    #             slider_value = self.opacity_slider.value()
 
-                if hasattr(self, 'flux_10th_percentile') and hasattr(self, 'flux_90th_percentile'):
-                    current_threshold = self.flux_10th_percentile + (slider_value / 100.0) * (
-                        self.flux_90th_percentile - self.flux_10th_percentile
-                    )
+    #             if hasattr(self, 'flux_10th_percentile') and hasattr(self, 'flux_90th_percentile'):
+    #                 current_threshold = self.flux_10th_percentile + (slider_value / 100.0) * (
+    #                     self.flux_90th_percentile - self.flux_10th_percentile
+    #                 )
 
-                    # Update the label to show threshold info
-                    threshold_percentile = 10 + (slider_value / 100.0) * 80  # 10th to 90th percentile
-                    self.opacity_label.setText(f"{threshold_percentile:.0f}th %ile ({current_threshold:.1e})")
-                else:
-                    self.opacity_label.setText(f"{slider_value}% threshold")
-            else:
-                # Regular transparency label for other modes
-                self.opacity_label.setText(f"{self.opacity_slider.value()}%")
+    #                 # Update the label to show threshold info
+    #                 threshold_percentile = 10 + (slider_value / 100.0) * 80  # 10th to 90th percentile
+    #                 self.opacity_label.setText(f"{threshold_percentile:.0f}th %ile ({current_threshold:.1e})")
+    #             else:
+    #                 self.opacity_label.setText(f"{slider_value}% threshold")
+    #         else:
+    #             # Regular transparency label for other modes
+    #             self.opacity_label.setText(f"{self.opacity_slider.value()}%")
 
-        except Exception as e:
-            print(f"Error updating volume threshold label: {e}")
+    #     except Exception as e:
+    #         print(f"Error updating volume threshold label: {e}")
 
     def clear_field_visualization(self):
         """ENHANCED clearing to handle ALL visualization actors properly"""
@@ -4111,84 +4199,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         except Exception as e:
             print(f"Volume rendering setup failed: {e}")
             self.setup_point_cloud_rendering()
-
-    def setup_threshold_volume_transfer_functions(self, slider_value):
-        """Setup volume transfer functions based on threshold slider (10th-90th percentile)"""
-        try:
-            if not hasattr(self, 'volume_actor') or not self.volume_actor:
-                return
-
-            volume_property = self.volume_actor.GetProperty()
-
-            # Map slider (0-100) to threshold range (10th-90th percentile)
-            threshold_flux = self.flux_10th_percentile + (slider_value / 100.0) * (
-                self.flux_90th_percentile - self.flux_10th_percentile
-            )
-
-            print(f"Volume threshold set to {threshold_flux:.2e} (slider: {slider_value}%)")
-
-            # Get full scalar range for transfer functions
-            scalar_range = self.volume_data.GetScalarRange()
-
-            # Color function - vibrant colors for visible regions
-            color_func = vtk.vtkColorTransferFunction()
-            color_func.AddRGBPoint(scalar_range[0], 0.0, 0.0, 0.0)           # Background = black
-            color_func.AddRGBPoint(threshold_flux * 0.99, 0.0, 0.0, 0.0)    # Just below threshold = black
-            color_func.AddRGBPoint(threshold_flux, 0.0, 0.0, 1.0)           # At threshold = blue
-            color_func.AddRGBPoint(threshold_flux * 1.5, 0.0, 1.0, 1.0)     # Higher = cyan
-            color_func.AddRGBPoint(threshold_flux * 3.0, 0.0, 1.0, 0.0)     # Higher = green
-            color_func.AddRGBPoint(threshold_flux * 6.0, 1.0, 1.0, 0.0)     # Higher = yellow
-            color_func.AddRGBPoint(scalar_range[1], 1.0, 0.0, 0.0)          # Maximum = red
-
-            # Opacity function - SHARP cutoff at threshold (no gradual fade)
-            opacity_func = vtk.vtkPiecewiseFunction()
-            opacity_func.AddPoint(scalar_range[0], 0.0)                      # Background = invisible
-            opacity_func.AddPoint(threshold_flux * 0.99, 0.0)               # Just below threshold = invisible
-            opacity_func.AddPoint(threshold_flux, 0.6)                      # At threshold = suddenly visible
-            opacity_func.AddPoint(threshold_flux * 2.0, 0.8)                # Higher flux = more opaque
-            opacity_func.AddPoint(scalar_range[1], 1.0)                     # Maximum flux = fully opaque
-
-            # Apply transfer functions
-            volume_property.SetColor(color_func)
-            volume_property.SetScalarOpacity(opacity_func)
-
-            print(f"Volume transfer functions updated with sharp threshold at {threshold_flux:.2e}")
-
-        except Exception as e:
-            print(f"Error setting up volume transfer functions: {e}")
-
-    def calculate_volume_percentiles(self, volume_data):
-        """Calculate flux percentiles for threshold mapping"""
-        try:
-            scalar_array = volume_data.GetPointData().GetScalars()
-            if not scalar_array:
-                print("No scalar data for percentile calculation")
-                return
-
-            # Convert to numpy for percentile calculation
-            import vtk.util.numpy_support as vtk_np
-            flux_values = vtk_np.vtk_to_numpy(scalar_array)
-
-            # Remove zeros/background for better percentile calculation
-            non_zero_flux = flux_values[flux_values > 0]
-
-            if len(non_zero_flux) == 0:
-                print("No non-zero flux values found")
-                self.flux_10th_percentile = flux_values.min()
-                self.flux_90th_percentile = flux_values.max()
-            else:
-                # Calculate 10th and 90th percentiles of actual flux
-                self.flux_10th_percentile = np.percentile(non_zero_flux, 10)
-                self.flux_90th_percentile = np.percentile(non_zero_flux, 90)
-
-            print(f"Flux percentiles: 10th={self.flux_10th_percentile:.2e}, 90th={self.flux_90th_percentile:.2e}")
-
-        except Exception as e:
-            print(f"Error calculating percentiles: {e}")
-            # Fallback to scalar range
-            scalar_range = volume_data.GetScalarRange()
-            self.flux_10th_percentile = scalar_range[0] + 0.1 * (scalar_range[1] - scalar_range[0])
-            self.flux_90th_percentile = scalar_range[0] + 0.9 * (scalar_range[1] - scalar_range[0])
             
     def create_downsampled_volume_data(self):
         """Create heavily downsampled volume data for performance"""
@@ -4290,16 +4300,6 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
 
         except Exception as e:
             print(f"Error updating volume transfer functions: {e}")
-
-    def add_volume_performance_warning(self):
-        """Add a warning message for volume rendering"""
-        # This could be added to the UI setup to warn users
-        if hasattr(self, 'viz_mode_combo'):
-            # Find the combo box and add tooltip
-            self.viz_mode_combo.setToolTip(
-                "Volume Rendering: May be slow on large datasets.\n"
-                "Use Point Cloud or Isosurfaces for better performance."
-            )
 
     def setup_isosurface_rendering(self):
         """Fixed isosurface rendering"""
@@ -4530,18 +4530,14 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             else:
                 current_style = "Single Isosurface"
 
-            # Get current color mode
-            color_mode = getattr(self, 'wireframe_color_mode_combo', None)
-            if color_mode:
-                current_color_mode = color_mode.currentText()
-            else:
-                current_color_mode = "Color by Flux Value"
+            # Always use LUT-based coloring for wireframes
+            current_color_mode = "Color by Flux Value"
 
             if current_style == "Single Isosurface":
                 self.create_controllable_single_isosurface_with_color(scalar_range, current_color_mode)
             elif current_style == "Multiple Isosurface":
                 self.create_isosurface_wireframes_with_color(scalar_range, current_color_mode)
-            else:  # Boundary Box
+            else:
                 self.create_boundary_wireframe()
 
             print("Enhanced wireframe rendering with color mapping complete")
@@ -4580,25 +4576,27 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             wireframe_mapper = vtk.vtkPolyDataMapper()
             wireframe_mapper.SetInputConnection(self.current_edges_filter.GetOutputPort())
             
-            # Apply color mode
-            if color_mode == "Color by Flux Value":
-                # Enable scalar coloring
-                wireframe_mapper.ScalarVisibilityOn()
-                wireframe_mapper.SetScalarRange(scalar_range)
-                
-                # Create and apply lookup table
-                lut = self.create_lookup_table(self.colormap_combo.currentText())
-                wireframe_mapper.SetLookupTable(lut)
-                
-                # Setup scalar bar
-                scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
-                self.setup_scalar_bar(lut, scalar_name)
-                
-                print("Applied flux-based coloring to wireframe")
-            else:
-                # Use solid color
-                wireframe_mapper.ScalarVisibilityOff()
-                print("Applied solid color to wireframe")
+            # Apply LUT coloring (always) with safe log range
+            cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
+            effective_min = max(scalar_range[0], cutoff)
+            effective_max = max(scalar_range[1], effective_min * 1.0001)
+            effective_range = (effective_min, effective_max)
+
+            wireframe_mapper.ScalarVisibilityOn()
+            if hasattr(wireframe_mapper, 'SetScalarModeToUsePointData'):
+                wireframe_mapper.SetScalarModeToUsePointData()
+                scalar_array = self.vtk_data.GetPointData().GetScalars()
+            if scalar_array and scalar_array.GetName():
+                wireframe_mapper.SelectColorArray(scalar_array.GetName())
+
+            lut = self.create_lookup_table_with_scale(self.colormap_combo.currentText(),
+                                                          self.scale_mode_combo.currentText(),
+                                                          effective_range)
+            wireframe_mapper.SetScalarRange(effective_range)
+            wireframe_mapper.SetLookupTable(lut)
+
+            # Scalar bar
+            self.setup_scalar_bar(lut, scalar_array.GetName() if scalar_array else "Field Value")
             
             self.field_actor = vtk.vtkActor()
             self.field_actor.SetMapper(wireframe_mapper)
@@ -4615,320 +4613,183 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print("No contour generated at this level")
 
     def create_isosurface_wireframes_with_color(self, scalar_range, color_mode):
-        """Create multiple wireframe contours with color mapping support"""
-        if scalar_range[1] <= scalar_range[0]:
+        """Create multiple isosurface wireframes from UI levels with LUT coloring (log-safe)."""
+        import vtk
+        import numpy as np
+
+        # Basic guards
+        if not hasattr(self, 'vtk_data') or not self.vtk_data:
+            return
+        if not scalar_range or scalar_range[1] <= scalar_range[0]:
             return
 
-        print(f"Creating multiple isosurface wireframes with {color_mode}...")
+        # Build levels (percent → absolute) from the UI; fall back to defaults
+        ui_percents = self._get_multi_iso_levels() if hasattr(self, '_get_multi_iso_levels') else None
+        if not ui_percents:
+            ui_percents = [20, 40, 60, 80]
+        levels = [scalar_range[1] * (p / 100.0) for p in ui_percents]
 
-        # Initialize wireframe actors list if it doesn't exist
-        if not hasattr(self, 'wireframe_actors'):
-            self.wireframe_actors = []
+        # Clear any previous wireframe actors for a clean rebuild
+        if hasattr(self, 'wireframe_actors') and self.wireframe_actors:
+            for actor in self.wireframe_actors:
+                try:
+                    self.renderer.RemoveActor(actor)
+                except Exception:
+                    pass
+        self.wireframe_actors = []
 
-        # Create 4 isosurface levels in the meaningful range
-        min_val = scalar_range[1] * 0.2   # 20% of max
-        max_val = scalar_range[1] * 0.8   # 80% of max
+        # Compute a log-safe effective range (avoid log(0) → NaN)
+        cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
+        effective_min = max(scalar_range[0], cutoff)
+        effective_max = max(scalar_range[1], effective_min * 1.0001)
+        effective_range = (effective_min, effective_max)
 
-        if max_val > min_val:
-            num_levels = 4
-            levels = np.linspace(min_val, max_val, num_levels)
+        # Colormap / scale mode
+        colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Blue to Red'
+        scale_mode = self.scale_mode_combo.currentText() if hasattr(self, 'scale_mode_combo') else 'Linear'
+        lut = self.create_lookup_table_with_scale(colormap_name, scale_mode, effective_range)
 
-            # Define distinct colors for solid color mode
-            solid_colors = [
-                [0.0, 0.0, 1.0],  # Blue (outermost, lowest)
-                [0.0, 0.7, 0.7],  # Cyan
-                [1.0, 0.7, 0.0],  # Orange  
-                [1.0, 0.0, 0.0]   # Red (innermost, highest)
-            ]
+        # Scalar array name (for mapper selection)
+        scalar_array = self.vtk_data.GetPointData().GetScalars()
+        scalar_name = scalar_array.GetName() if scalar_array else "Field Value"
 
-            for i, level in enumerate(levels):
-                # Create contour
-                contour = vtk.vtkContourFilter()
-                contour.SetInputData(self.vtk_data)
-                contour.SetValue(0, level)
-                contour.Update()
+        # Opacity from UI if present
+        try:
+            ui_opacity = (self.opacity_slider.value() / 100.0) if hasattr(self, 'opacity_slider') else 0.9
+        except Exception:
+            ui_opacity = 0.9
 
-                contour_output = contour.GetOutput()
+        # Build each level
+        for i, level in enumerate(levels):
+            contour = vtk.vtkContourFilter()
+            contour.SetInputData(self.vtk_data)
+            contour.SetValue(0, float(level))
+            contour.Update()
 
-                if contour_output.GetNumberOfPoints() > 0:
-                    # Extract edges to create wireframe
-                    edges = vtk.vtkExtractEdges()
-                    edges.SetInputData(contour_output)
-                    edges.Update()
+            contour_output = contour.GetOutput()
+            if not contour_output or contour_output.GetNumberOfPoints() == 0:
+                continue
 
-                    # Create mapper
-                    wireframe_mapper = vtk.vtkPolyDataMapper()
-                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
+            # Extract edges to render as wireframe
+            edges = vtk.vtkExtractEdges()
+            edges.SetInputData(contour_output)
+            edges.Update()
 
-                    # Apply color mode
-                    if color_mode == "Color by Flux Value":
-                        # Enable scalar coloring
-                        wireframe_mapper.ScalarVisibilityOn()
-                        wireframe_mapper.SetScalarRange(scalar_range)
-                        
-                        # Create and apply lookup table
-                        lut = self.create_lookup_table(self.colormap_combo.currentText())
-                        wireframe_mapper.SetLookupTable(lut)
-                        
-                        # Setup scalar bar (only once)
-                        if i == 0:
-                            scalar_name = self.vtk_data.GetPointData().GetScalars().GetName()
-                            self.setup_scalar_bar(lut, scalar_name)
-                    else:
-                        # Use distinct solid colors
-                        wireframe_mapper.ScalarVisibilityOff()
+            # Mapper with LUT coloring (always on)
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(edges.GetOutputPort())
+            mapper.ScalarVisibilityOn()
+            if hasattr(mapper, 'SetScalarModeToUsePointData'):
+                mapper.SetScalarModeToUsePointData()
+            if scalar_array and scalar_name:
+                mapper.SelectColorArray(scalar_name)
+            mapper.SetScalarRange(effective_range[0], effective_range[1])
+            mapper.SetLookupTable(lut)
 
-                    # Create actor
-                    wireframe_actor = vtk.vtkActor()
-                    wireframe_actor.SetMapper(wireframe_mapper)
+            # Actor properties
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetLineWidth(2.5)
+            actor.GetProperty().SetOpacity(ui_opacity)
 
-                    if color_mode == "Solid Color":
-                        # Set distinct color for this level
-                        color = solid_colors[i] if i < len(solid_colors) else [1.0, 1.0, 1.0]
-                        wireframe_actor.GetProperty().SetColor(color[0], color[1], color[2])
+            # Add to scene and keep a handle
+            self.renderer.AddActor(actor)
+            self.wireframe_actors.append(actor)
 
-                    wireframe_actor.GetProperty().SetLineWidth(2.5)
-                    wireframe_actor.GetProperty().SetOpacity(0.9)
+        # One scalar bar for all
+        if hasattr(self, 'setup_scalar_bar'):
+            self.setup_scalar_bar(lut, scalar_name)
 
-                    self.wireframe_actors.append(wireframe_actor)
-                    self.renderer.AddActor(wireframe_actor)
-
-                    color_desc = f"color: {solid_colors[i]}" if color_mode == "Solid Color" else "flux-colored"
-                    print(f"  Level {i+1}: {level:.2e} ({color_desc}) - {contour_output.GetNumberOfPoints()} points")
-
-            color_mode_desc = "flux-based coloring" if color_mode == "Color by Flux Value" else "distinct solid colors"
-            print(f"Created {len(levels)} nested isosurface wireframes with {color_mode_desc}")
-        else:
-            print("Invalid scalar range for multiple isosurfaces")
-
-    def create_isosurface_wireframes(self, scalar_range):
-        """Create wireframe contours at different flux levels"""
-        if scalar_range[1] <= scalar_range[0]:
-            return
-
-        print("Creating multiple isosurface wireframes...")
-
-        # Initialize wireframe actors list if it doesn't exist
-        if not hasattr(self, 'wireframe_actors'):
-            self.wireframe_actors = []
-
-        # Create 4 isosurface levels in the meaningful range
-        min_val = scalar_range[1] * 0.2   # 20% of max
-        max_val = scalar_range[1] * 0.8   # 80% of max
-
-        if max_val > min_val:
-            num_levels = 4
-            levels = np.linspace(min_val, max_val, num_levels)
-
-            # Define distinct colors for each level (blue to red)
-            colors = [
-                [0.0, 0.0, 1.0],  # Blue (outermost, lowest)
-                [0.0, 0.7, 0.7],  # Cyan
-                [1.0, 0.7, 0.0],  # Orange  
-                [1.0, 0.0, 0.0]   # Red (innermost, highest)
-            ]
-
-            for i, level in enumerate(levels):
-                # Create contour
-                contour = vtk.vtkContourFilter()
-                contour.SetInputData(self.vtk_data)
-                contour.SetValue(0, level)
-                contour.Update()
-
-                contour_output = contour.GetOutput()
-
-                if contour_output.GetNumberOfPoints() > 0:
-                    # Extract edges to create wireframe
-                    edges = vtk.vtkExtractEdges()
-                    edges.SetInputData(contour_output)
-                    edges.Update()
-
-                    # Create mapper
-                    wireframe_mapper = vtk.vtkPolyDataMapper()
-                    wireframe_mapper.SetInputConnection(edges.GetOutputPort())
-
-                    # IMPORTANT: Turn OFF scalar visibility to use solid colors
-                    wireframe_mapper.ScalarVisibilityOff()
-
-                    # Create actor
-                    wireframe_actor = vtk.vtkActor()
-                    wireframe_actor.SetMapper(wireframe_mapper)
-
-                    # Set distinct color for this level
-                    color = colors[i] if i < len(colors) else [1.0, 1.0, 1.0]
-                    wireframe_actor.GetProperty().SetColor(color[0], color[1], color[2])
-                    wireframe_actor.GetProperty().SetLineWidth(2.5)
-                    wireframe_actor.GetProperty().SetOpacity(0.9)
-
-                    self.wireframe_actors.append(wireframe_actor)
-                    self.renderer.AddActor(wireframe_actor)
-
-                    print(f"  Level {i+1}: {level:.2e} (color: {color}) - {contour_output.GetNumberOfPoints()} points")
-
-            print(f"Created {len(levels)} nested isosurface wireframes with distinct colors")
-        else:
-            print("Invalid scalar range for multiple isosurfaces")
+        # Trigger a render
+        if hasattr(self, 'vtk_widget'):
+            self.vtk_widget.GetRenderWindow().Render()
 
     def create_boundary_wireframe(self):
-        """Create wireframe around the boundary of the dataset"""
-        if not self.vtk_data:
-            print("No VTK data for boundary wireframe")
-            return
+        import vtk
 
-        print("Creating boundary wireframe...")
+        if not getattr(self, "renderer", None) or not getattr(self, "vtk_data", None):
+            return False
 
+        # Remove prior actor
+        if getattr(self, "field_actor", None):
+            try: self.renderer.RemoveActor(self.field_actor)
+            except Exception: pass
+            self.field_actor = None
+
+        # Get bounds (fallback via geometry filter if needed)
+        data = self.vtk_data
+        bounds = data.GetBounds() if hasattr(data, "GetBounds") else None
+        if not bounds or len(bounds) != 6 or any(b is None for b in bounds):
+            gf = vtk.vtkGeometryFilter()
+            if hasattr(data, "GetOutputPort"): gf.SetInputConnection(data.GetOutputPort())
+            else:                               gf.SetInputData(data)
+            gf.Update()
+            bounds = gf.GetOutput().GetBounds()
+            if not bounds or len(bounds) != 6: return False
+
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        eps = 1e-6
+        if xmax - xmin < eps: xmax = xmin + eps
+        if ymax - ymin < eps: ymax = ymin + eps
+        if zmax - zmin < eps: zmax = zmin + eps
+
+        # Try outline filter first
+        use_outline = True
         try:
-            # Simple and reliable approach: just create an outline of the data bounds
             outline = vtk.vtkOutlineFilter()
-            outline.SetInputData(self.vtk_data)
+            if hasattr(data, "GetOutputPort"): outline.SetInputConnection(data.GetOutputPort())
+            else:                              outline.SetInputData(data)
             outline.Update()
+            if outline.GetOutput().GetNumberOfCells() <= 0:
+                use_outline = False
+        except Exception:
+            use_outline = False
 
-            outline_output = outline.GetOutput()
-
-            if outline_output.GetNumberOfCells() == 0:
-                print("No outline generated, trying bounding box...")
-                self.create_bounding_box_wireframe()
-                return
-
-            # Create mapper
-            wireframe_mapper = vtk.vtkPolyDataMapper()
-            wireframe_mapper.SetInputConnection(outline.GetOutputPort())
-            wireframe_mapper.ScalarVisibilityOff()  # Use solid color
-
-            # Create actor
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(wireframe_mapper)
-
-            # Set appearance
-            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Bright yellow
-            self.field_actor.GetProperty().SetLineWidth(3.0)
-
-            # Apply transparency setting
-            opacity = self.opacity_slider.value() / 100.0 if hasattr(self, 'opacity_slider') else 0.8
-            self.field_actor.GetProperty().SetOpacity(opacity)
-
-            # Add to renderer
-            self.renderer.AddActor(self.field_actor)
-
-            # Get bounds for debug info
-            bounds = self.vtk_data.GetBounds()
-            print(f"Boundary wireframe created successfully")
-            print(f"Bounds: X({bounds[0]:.0f} to {bounds[1]:.0f}) Y({bounds[2]:.0f} to {bounds[3]:.0f}) Z({bounds[4]:.0f} to {bounds[5]:.0f})")
-
-        except Exception as e:
-            print(f"Error creating boundary wireframe: {e}")
-            import traceback
-            traceback.print_exc()
-
-            # Fallback: simple bounding box wireframe
-            print("Falling back to bounding box wireframe...")
-            self.create_bounding_box_wireframe()
-
-    def create_bounding_box_wireframe(self):
-        """Fallback: Create a simple bounding box wireframe"""
-        if not self.vtk_data:
-            return
-
-        try:
-            # Get data bounds
-            bounds = self.vtk_data.GetBounds()
-
-            # Create a simple cube outline
-            outline = vtk.vtkOutlineFilter()
-            outline.SetInputData(self.vtk_data)
-            outline.Update()
-
-            # Create mapper and actor
-            outline_mapper = vtk.vtkPolyDataMapper()
-            outline_mapper.SetInputConnection(outline.GetOutputPort())
-
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(outline_mapper)
-            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Yellow
-            self.field_actor.GetProperty().SetLineWidth(3.0)
-            self.field_actor.GetProperty().SetOpacity(0.8)
-
-            self.renderer.AddActor(self.field_actor)
-
-            print(f"Bounding box wireframe created")
-            print(f"Bounds: X({bounds[0]:.0f}, {bounds[1]:.0f}) Y({bounds[2]:.0f}, {bounds[3]:.0f}) Z({bounds[4]:.0f}, {bounds[5]:.0f})")
-
-        except Exception as e:
-            print(f"Error creating bounding box wireframe: {e}")
-
-    def create_bounding_box_wireframe(self):
-        """Fallback: Create a simple bounding box wireframe"""
-        if not self.vtk_data:
-            return
-
-        try:
-            # Get data bounds
-            bounds = self.vtk_data.GetBounds()
-
-            # Create a simple cube outline
-            outline = vtk.vtkOutlineFilter()
-            outline.SetInputData(self.vtk_data)
-            outline.Update()
-
-            # Create mapper and actor
-            outline_mapper = vtk.vtkPolyDataMapper()
-            outline_mapper.SetInputConnection(outline.GetOutputPort())
-
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(outline_mapper)
-            self.field_actor.GetProperty().SetColor(1.0, 1.0, 0.0)  # Yellow
-            self.field_actor.GetProperty().SetLineWidth(3.0)
-            self.field_actor.GetProperty().SetOpacity(0.8)
-
-            self.renderer.AddActor(self.field_actor)
-
-            print(f"Bounding box wireframe created")
-            print(f"Bounds: X({bounds[0]:.0f}, {bounds[1]:.0f}) Y({bounds[2]:.0f}, {bounds[3]:.0f}) Z({bounds[4]:.0f}, {bounds[5]:.0f})")
-
-        except Exception as e:
-            print(f"Error creating bounding box wireframe: {e}")
-
-    def create_controllable_single_isosurface(self, scalar_range):
-        """Create isosurface with stored references for fast updates"""
-        if scalar_range[1] <= scalar_range[0]:
-            return
-            
-        level_percent = getattr(self, 'isosurface_level_slider', None)
-        if level_percent:
-            percent = level_percent.value() / 100.0
+        if use_outline:
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(outline.GetOutputPort())
+            mapper.ScalarVisibilityOff()
         else:
-            percent = 0.5
-            
-        contour_level = scalar_range[1] * percent
-        print(f"Creating isosurface wireframe at {percent*100:.0f}% ({contour_level:.2e})")
-        
-        # Create contour filter
-        self.current_contour_filter = vtk.vtkContourFilter()  # Store reference for fast updates
-        self.current_contour_filter.SetInputData(self.vtk_data)
-        self.current_contour_filter.SetValue(0, contour_level)
-        self.current_contour_filter.Update()
-        
-        contour_output = self.current_contour_filter.GetOutput()
-        
-        if contour_output.GetNumberOfPoints() > 0:
-            # Create edges filter
-            self.current_edges_filter = vtk.vtkExtractEdges()  # Store reference
-            self.current_edges_filter.SetInputConnection(self.current_contour_filter.GetOutputPort())
-            self.current_edges_filter.Update()
-            
-            wireframe_mapper = vtk.vtkPolyDataMapper()
-            wireframe_mapper.SetInputConnection(self.current_edges_filter.GetOutputPort())
-            
-            self.field_actor = vtk.vtkActor()
-            self.field_actor.SetMapper(wireframe_mapper)
-            self.field_actor.GetProperty().SetColor(0.9, 0.9, 0.2)
-            self.field_actor.GetProperty().SetLineWidth(2.0)
-            self.field_actor.GetProperty().SetOpacity(self.opacity_slider.value() / 100.0)
-            
-            self.renderer.AddActor(self.field_actor)
-            print(f"Isosurface wireframe created: {contour_output.GetNumberOfPoints()} points")
-        else:
-            print("No contour generated at this level")
+            cube = vtk.vtkCubeSource()
+            if hasattr(cube, "SetBounds"): cube.SetBounds(xmin, xmax, ymin, ymax, zmin, zmax)
+            else:
+                cube.SetCenter((xmin + xmax)/2.0, (ymin + ymax)/2.0, (zmin + zmax)/2.0)
+                cube.SetXLength(max(xmax - xmin, eps))
+                cube.SetYLength(max(ymax - ymin, eps))
+                cube.SetZLength(max(zmax - zmin, eps))
+            cube.Update()
+            edges = vtk.vtkExtractEdges()
+            edges.SetInputConnection(cube.GetOutputPort())
+            edges.Update()
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(edges.GetOutputPort())
+
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        prop = actor.GetProperty()
+        prop.SetRepresentationToWireframe()
+        prop.SetLighting(False)
+        # Color with basic contrast heuristic
+        bg = self.renderer.GetBackground() if hasattr(self.renderer, "GetBackground") else (0.0, 0.0, 0.0)
+        line = (1.0, 1.0, 0.0) if (0.2126*bg[0] + 0.7152*bg[1] + 0.0722*bg[2]) < 0.5 else (0.0, 0.0, 0.0)
+        prop.SetColor(*line)
+        prop.SetLineWidth(2.5)
+        try:
+            opacity = self.opacity_slider.value()/100.0
+        except Exception:
+            opacity = 1.0
+        prop.SetOpacity(max(0.05, min(1.0, float(opacity))))
+
+        self.field_actor = actor
+        self.renderer.AddActor(actor)
+        self.renderer.ResetCameraClippingRange()
+        if hasattr(self, "vtk_widget"):
+            self.vtk_widget.GetRenderWindow().Render()
+        return True
+
+    # Optional: backward-compat alias if anything else calls the old helper.
+    def create_bounding_box_wireframe(self):
+        return self.create_boundary_wireframe()
 
     def setup_surface_with_edges(self):
         """Fixed surface with edges rendering"""
@@ -5099,6 +4960,18 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                     if actor:
                         actor.GetProperty().SetOpacity(opacity)
 
+            # Handle wireframe actors (multiple isosurfaces)
+            if hasattr(self, 'wireframe_actors'):
+                for actor in self.wireframe_actors:
+                    if actor:
+                        actor.GetProperty().SetOpacity(opacity)
+
+            # Handle wireframe actors (multiple isosurfaces)
+            if hasattr(self, 'wireframe_actors'):
+                for actor in self.wireframe_actors:
+                    if actor:
+                        actor.GetProperty().SetOpacity(opacity)
+            
             # KEEP ALL TRAIL ACTORS at their designed opacity
             if hasattr(self, 'trail_actors'):
                 for i, actor in enumerate(self.trail_actors):
@@ -5117,41 +4990,41 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         except Exception as e:
             print(f"Error updating opacity: {e}")
 
-    def scale_volume_opacity_smoothly(self, slider_opacity):
-        """Scale volume opacity smoothly without making blocks disappear"""
-        try:
-            if not hasattr(self, 'base_opacity_func') or not hasattr(self, 'volume_scalar_range'):
-                print("No base opacity function stored, recreating...")
-                # Fallback: recreate the smooth opacity function
-                self.recreate_smooth_volume_opacity(slider_opacity)
-                return
+    # def scale_volume_opacity_smoothly(self, slider_opacity):
+    #     """Scale volume opacity smoothly without making blocks disappear"""
+    #     try:
+    #         if not hasattr(self, 'base_opacity_func') or not hasattr(self, 'volume_scalar_range'):
+    #             print("No base opacity function stored, recreating...")
+    #             # Fallback: recreate the smooth opacity function
+    #             self.recreate_smooth_volume_opacity(slider_opacity)
+    #             return
 
-            volume_property = self.volume_actor.GetProperty()
-            scalar_range = self.volume_scalar_range
+    #         volume_property = self.volume_actor.GetProperty()
+    #         scalar_range = self.volume_scalar_range
 
-            # Create new opacity function by scaling the base function
-            new_opacity_func = vtk.vtkPiecewiseFunction()
+    #         # Create new opacity function by scaling the base function
+    #         new_opacity_func = vtk.vtkPiecewiseFunction()
 
-            # Always keep a minimum opacity to prevent blocks from disappearing
-            min_opacity = 0.02 * slider_opacity  # Minimum visibility scales with slider
-            max_opacity = 0.8 * slider_opacity   # Maximum visibility scales with slider
+    #         # Always keep a minimum opacity to prevent blocks from disappearing
+    #         min_opacity = 0.02 * slider_opacity  # Minimum visibility scales with slider
+    #         max_opacity = 0.8 * slider_opacity   # Maximum visibility scales with slider
 
-            # Apply the scaled opacity curve
-            new_opacity_func.AddPoint(scalar_range[0], 0.0)                           # Background stays invisible
-            new_opacity_func.AddPoint(scalar_range[1] * 0.1, max(min_opacity, 0.01)) # Minimum for low flux
-            new_opacity_func.AddPoint(scalar_range[1] * 0.3, min_opacity * 2)        # Scale medium flux
-            new_opacity_func.AddPoint(scalar_range[1] * 0.6, min_opacity * 4)        # Scale higher flux  
-            new_opacity_func.AddPoint(scalar_range[1], max_opacity)                  # Scale max flux
+    #         # Apply the scaled opacity curve
+    #         new_opacity_func.AddPoint(scalar_range[0], 0.0)                           # Background stays invisible
+    #         new_opacity_func.AddPoint(scalar_range[1] * 0.1, max(min_opacity, 0.01)) # Minimum for low flux
+    #         new_opacity_func.AddPoint(scalar_range[1] * 0.3, min_opacity * 2)        # Scale medium flux
+    #         new_opacity_func.AddPoint(scalar_range[1] * 0.6, min_opacity * 4)        # Scale higher flux  
+    #         new_opacity_func.AddPoint(scalar_range[1], max_opacity)                  # Scale max flux
 
-            # Apply the new opacity function
-            volume_property.SetScalarOpacity(new_opacity_func)
+    #         # Apply the new opacity function
+    #         volume_property.SetScalarOpacity(new_opacity_func)
 
-            print(f"Volume opacity scaled smoothly: min={min_opacity:.3f}, max={max_opacity:.3f}")
+    #         print(f"Volume opacity scaled smoothly: min={min_opacity:.3f}, max={max_opacity:.3f}")
 
-        except Exception as e:
-            print(f"Error scaling volume opacity: {e}")
-            # Fallback
-            self.recreate_smooth_volume_opacity(slider_opacity)
+    #     except Exception as e:
+    #         print(f"Error scaling volume opacity: {e}")
+    #         # Fallback
+    #         self.recreate_smooth_volume_opacity(slider_opacity)
 
     def recreate_smooth_volume_opacity(self, slider_opacity):
         """Recreate smooth volume opacity from scratch if scaling fails"""
@@ -5187,17 +5060,17 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         except Exception as e:
             print(f"Error recreating smooth volume opacity: {e}")
 
-    def toggle_threshold(self, enabled):
-        """Toggle threshold filtering - FIXED"""
-        try:
-            if enabled and self.vtk_data:
-                self.update_threshold()
-            else:
-                # Restore original data visualization
-                current_mode = self.viz_mode_combo.currentText()
-                self.change_visualization_mode(current_mode)
-        except Exception as e:
-            print(f"Error toggling threshold: {e}")
+    # def toggle_threshold(self, enabled):
+    #     """Toggle threshold filtering - FIXED"""
+    #     try:
+    #         if enabled and self.vtk_data:
+    #             self.update_threshold()
+    #         else:
+    #             # Restore original data visualization
+    #             current_mode = self.viz_mode_combo.currentText()
+    #             self.change_visualization_mode(current_mode)
+    #     except Exception as e:
+    #         print(f"Error toggling threshold: {e}")
 
     def update_threshold(self):
         """Update threshold values - FIXED"""
@@ -5281,30 +5154,30 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             self.vtk_data = original_data
             self.setup_field_visualization()
 
-    def toggle_isosurfaces(self, enabled):
-        """Toggle isosurface display - FIXED"""
-        try:
-            if enabled and self.vtk_data:
-                if self.viz_mode_combo.currentText() != "Isosurfaces":
-                    self.viz_mode_combo.setCurrentText("Isosurfaces")
-                else:
-                    self.setup_isosurface_rendering()
-            elif not enabled:
-                # Switch to a different mode or clear isosurfaces
-                if self.viz_mode_combo.currentText() == "Isosurfaces":
-                    self.viz_mode_combo.setCurrentText("Point Cloud")
-        except Exception as e:
-            print(f"Error toggling isosurfaces: {e}")
+    # def toggle_isosurfaces(self, enabled):
+    #     """Toggle isosurface display - FIXED"""
+    #     try:
+    #         if enabled and self.vtk_data:
+    #             if self.viz_mode_combo.currentText() != "Isosurfaces":
+    #                 self.viz_mode_combo.setCurrentText("Isosurfaces")
+    #             else:
+    #                 self.setup_isosurface_rendering()
+    #         elif not enabled:
+    #             # Switch to a different mode or clear isosurfaces
+    #             if self.viz_mode_combo.currentText() == "Isosurfaces":
+    #                 self.viz_mode_combo.setCurrentText("Point Cloud")
+    #     except Exception as e:
+    #         print(f"Error toggling isosurfaces: {e}")
 
-    def update_isosurfaces(self):
-        """Update number of isosurfaces - FIXED"""
-        try:
-            if (self.viz_mode_combo.currentText() == "Isosurfaces" and 
-                self.isosurface_enabled.isChecked() and 
-                self.vtk_data):
-                self.setup_isosurface_rendering()
-        except Exception as e:
-            print(f"Error updating isosurfaces: {e}")
+    # def update_isosurfaces(self):
+    #     """Update number of isosurfaces - FIXED"""
+    #     try:
+    #         if (self.viz_mode_combo.currentText() == "Isosurfaces" and 
+    #             self.isosurface_enabled.isChecked() and 
+    #             self.vtk_data):
+    #             self.setup_isosurface_rendering()
+    #     except Exception as e:
+    #         print(f"Error updating isosurfaces: {e}")
 
     def change_colormap(self, colormap_name):
         """Change the color mapping - FIXED"""
@@ -5322,6 +5195,21 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
                         mapper = actor.GetMapper()
                         if mapper:
                             mapper.SetLookupTable(new_lut)
+
+            # Update multiple isosurface (wireframe) mappers with new LUT and effective range
+            if hasattr(self, 'wireframe_actors'):
+                cutoff = getattr(self, 'current_flux_cutoff', 1e-8)
+                original_range = getattr(self, 'current_scalar_range',
+                                         self.vtk_data.GetScalarRange() if self.vtk_data else (1e-8, 1))
+                effective_min = max(original_range[0], cutoff)
+                effective_max = max(original_range[1], effective_min * 1.0001)
+                effective_range = (effective_min, effective_max)
+                for actor in self.wireframe_actors:
+                    if actor:
+                        wm = actor.GetMapper()
+                        if wm:
+                            wm.SetLookupTable(new_lut)
+                            wm.SetScalarRange(effective_range[0], effective_range[1])
                             
             # Update scalar bar
             if hasattr(self, 'scalar_bar') and self.scalar_bar:
@@ -5546,39 +5434,39 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             print("Defaulting to UnstructuredGridReader")
             return vtk.vtkUnstructuredGridReader()
 
-    def convert_to_unstructured_grid(self, structured_data):
-        """Convert structured data (ImageData, StructuredGrid) to UnstructuredGrid"""
-        print("Converting structured data to unstructured grid...")
+    # def convert_to_unstructured_grid(self, structured_data):
+    #     """Convert structured data (ImageData, StructuredGrid) to UnstructuredGrid"""
+    #     print("Converting structured data to unstructured grid...")
         
-        if isinstance(structured_data, vtk.vtkImageData):
-            # Convert ImageData to UnstructuredGrid
-            converter = vtk.vtkImageDataGeometryFilter()
-            converter.SetInputData(structured_data)
-            converter.Update()
+    #     if isinstance(structured_data, vtk.vtkImageData):
+    #         # Convert ImageData to UnstructuredGrid
+    #         converter = vtk.vtkImageDataGeometryFilter()
+    #         converter.SetInputData(structured_data)
+    #         converter.Update()
             
-            # Convert resulting polydata to unstructured grid
-            return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
+    #         # Convert resulting polydata to unstructured grid
+    #         return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
             
-        elif isinstance(structured_data, vtk.vtkStructuredGrid):
-            # Convert StructuredGrid to UnstructuredGrid
-            converter = vtk.vtkStructuredGridGeometryFilter()
-            converter.SetInputData(structured_data)
-            converter.Update()
+    #     elif isinstance(structured_data, vtk.vtkStructuredGrid):
+    #         # Convert StructuredGrid to UnstructuredGrid
+    #         converter = vtk.vtkStructuredGridGeometryFilter()
+    #         converter.SetInputData(structured_data)
+    #         converter.Update()
             
-            # Convert resulting polydata to unstructured grid
-            return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
+    #         # Convert resulting polydata to unstructured grid
+    #         return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
             
-        elif isinstance(structured_data, vtk.vtkRectilinearGrid):
-            # Convert RectilinearGrid to UnstructuredGrid
-            converter = vtk.vtkRectilinearGridGeometryFilter()
-            converter.SetInputData(structured_data)
-            converter.Update()
+    #     elif isinstance(structured_data, vtk.vtkRectilinearGrid):
+    #         # Convert RectilinearGrid to UnstructuredGrid
+    #         converter = vtk.vtkRectilinearGridGeometryFilter()
+    #         converter.SetInputData(structured_data)
+    #         converter.Update()
             
-            return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
+    #         return self.convert_polydata_to_unstructured_grid(converter.GetOutput())
         
-        else:
-            # If it's already unstructured, return as-is
-            return structured_data
+    #     else:
+    #         # If it's already unstructured, return as-is
+    #         return structured_data
 
     def convert_polydata_to_unstructured_grid(self, polydata):
         """Convert PolyData to UnstructuredGrid"""
@@ -5602,44 +5490,44 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
         
         return ugrid
 
-    def setup_scalar_data(self):
-        """Setup and verify scalar data for visualization"""
-        if not self.vtk_data:
-            return
+    # def setup_scalar_data(self):
+    #     """Setup and verify scalar data for visualization"""
+    #     if not self.vtk_data:
+    #         return
             
-        point_data = self.vtk_data.GetPointData()
+    #     point_data = self.vtk_data.GetPointData()
         
-        # Check if we have scalar data
-        scalar_array = point_data.GetScalars()
+    #     # Check if we have scalar data
+    #     scalar_array = point_data.GetScalars()
         
-        if not scalar_array:
-            print("No scalar data found, checking available arrays...")
+    #     if not scalar_array:
+    #         print("No scalar data found, checking available arrays...")
             
-            # List all available arrays
-            n_arrays = point_data.GetNumberOfArrays()
-            print(f"Found {n_arrays} point data arrays:")
+    #         # List all available arrays
+    #         n_arrays = point_data.GetNumberOfArrays()
+    #         print(f"Found {n_arrays} point data arrays:")
             
-            for i in range(n_arrays):
-                array = point_data.GetArray(i)
-                print(f"  {i}: {array.GetName()} ({array.GetNumberOfTuples()} tuples, {array.GetNumberOfComponents()} components)")
+    #         for i in range(n_arrays):
+    #             array = point_data.GetArray(i)
+    #             print(f"  {i}: {array.GetName()} ({array.GetNumberOfTuples()} tuples, {array.GetNumberOfComponents()} components)")
             
-            if n_arrays > 0:
-                # Use the first array as scalars
-                first_array = point_data.GetArray(0)
-                point_data.SetScalars(first_array)
-                scalar_array = first_array
-                print(f"Using '{first_array.GetName()}' as scalar field")
-            else:
-                # Create a default scalar field based on distance from origin
-                print("Creating default scalar field based on distance from Earth center...")
-                self.create_default_scalar_field()
-                scalar_array = self.vtk_data.GetPointData().GetScalars()
+    #         if n_arrays > 0:
+    #             # Use the first array as scalars
+    #             first_array = point_data.GetArray(0)
+    #             point_data.SetScalars(first_array)
+    #             scalar_array = first_array
+    #             print(f"Using '{first_array.GetName()}' as scalar field")
+    #         else:
+    #             # Create a default scalar field based on distance from origin
+    #             print("Creating default scalar field based on distance from Earth center...")
+    #             self.create_default_scalar_field()
+    #             scalar_array = self.vtk_data.GetPointData().GetScalars()
         
-        # Ensure scalar array has a proper name
-        if scalar_array and not scalar_array.GetName():
-            scalar_array.SetName("flux_field")
+    #     # Ensure scalar array has a proper name
+    #     if scalar_array and not scalar_array.GetName():
+    #         scalar_array.SetName("flux_field")
             
-        print(f"Scalar field setup complete: {scalar_array.GetName() if scalar_array else 'None'}")
+    #     print(f"Scalar field setup complete: {scalar_array.GetName() if scalar_array else 'None'}")
 
     def create_default_scalar_field(self):
         """Create a default scalar field when none exists"""
@@ -5813,41 +5701,41 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             camera.SetViewUp(0, 0, 1)
             self.renderer.ResetCamera()
         
-    def debug_field_actor(self):
-        """Specific debug for field actor"""
-        print("\n=== FIELD ACTOR DEBUG ===")
+    # def debug_field_actor(self):
+    #     """Specific debug for field actor"""
+    #     print("\n=== FIELD ACTOR DEBUG ===")
         
-        if not hasattr(self, 'field_actor') or not self.field_actor:
-            print("No field_actor exists!")
-            return
+    #     if not hasattr(self, 'field_actor') or not self.field_actor:
+    #         print("No field_actor exists!")
+    #         return
             
-        print("Field actor exists")
+    #     print("Field actor exists")
         
-        # Check mapper
-        mapper = self.field_actor.GetMapper()
-        if mapper:
-            print("Mapper exists")
-            input_data = mapper.GetInput()
-            if input_data:
-                print(f"Mapper input: {input_data.GetNumberOfPoints()} points")
-                scalar_range = mapper.GetScalarRange()
-                print(f"Mapper scalar range: {scalar_range}")
-            else:
-                print("No input data on mapper!")
-        else:
-            print("No mapper on field actor!")
+    #     # Check mapper
+    #     mapper = self.field_actor.GetMapper()
+    #     if mapper:
+    #         print("Mapper exists")
+    #         input_data = mapper.GetInput()
+    #         if input_data:
+    #             print(f"Mapper input: {input_data.GetNumberOfPoints()} points")
+    #             scalar_range = mapper.GetScalarRange()
+    #             print(f"Mapper scalar range: {scalar_range}")
+    #         else:
+    #             print("No input data on mapper!")
+    #     else:
+    #         print("No mapper on field actor!")
             
-        # Check properties
-        prop = self.field_actor.GetProperty()
-        print(f"Opacity: {prop.GetOpacity()}")
-        print(f"Point size: {prop.GetPointSize()}")
-        print(f"Color: {prop.GetColor()}")
-        print(f"Representation: {prop.GetRepresentation()}")
+    #     # Check properties
+    #     prop = self.field_actor.GetProperty()
+    #     print(f"Opacity: {prop.GetOpacity()}")
+    #     print(f"Point size: {prop.GetPointSize()}")
+    #     print(f"Color: {prop.GetColor()}")
+    #     print(f"Representation: {prop.GetRepresentation()}")
         
-        # Check visibility
-        print(f"Visibility: {self.field_actor.GetVisibility()}")
+    #     # Check visibility
+    #     print(f"Visibility: {self.field_actor.GetVisibility()}")
         
-        print("=========================\n")
+    #     print("=========================\n")
             
     def setup_scalar_bar(self, lut, scalar_name):
         """Setup scalar bar - FIXED"""
@@ -5895,26 +5783,26 @@ For best results, use an equirectangular projection (2:1 aspect ratio).
             import traceback
             traceback.print_exc()
 
-    def update_status_with_units(self):
-        """ENHANCED: Update status display with proper units"""
-        if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
-            return
+    # def update_status_with_units(self):
+    #     """ENHANCED: Update status display with proper units"""
+    #     if not self.orbital_path or self.current_time_index >= len(self.orbital_path):
+    #         return
             
-        current_point = self.orbital_path[self.current_time_index]
+    #     current_point = self.orbital_path[self.current_time_index]
         
-        # Calculate additional useful metrics
-        distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
-        altitude_km = distance_from_earth - 6371  # Earth radius
+    #     # Calculate additional useful metrics
+    #     distance_from_earth = np.sqrt(current_point.x**2 + current_point.y**2 + current_point.z**2)
+    #     altitude_km = distance_from_earth - 6371  # Earth radius
         
-        # Calculate flux with units
-        flux = self.flux_analyzer.analyze_flux_at_point(current_point)
+    #     # Calculate flux with units
+    #     flux = self.flux_analyzer.analyze_flux_at_point(current_point)
         
-        # Enhanced status with better units and formatting
-        self.status_label.setText(
-            f"Time: {current_point.time:.2f} h | Altitude: {altitude_km:.1f} km\n"
-            f"Position: ({current_point.x:.0f}, {current_point.y:.0f}, {current_point.z:.0f}) km\n"
-            f"Flux: {flux:.2e} particles/s through {self.cross_section_spinbox.value():.1f} m² cross-section"
-        )
+    #     # Enhanced status with better units and formatting
+    #     self.status_label.setText(
+    #         f"Time: {current_point.time:.2f} h | Altitude: {altitude_km:.1f} km\n"
+    #         f"Position: ({current_point.x:.0f}, {current_point.y:.0f}, {current_point.z:.0f}) km\n"
+    #         f"Flux: {flux:.2e} particles/s through {self.cross_section_spinbox.value():.1f} m² cross-section"
+    #     )
         
     def load_orbital_data(self):
         """Load orbital CSV data - UPDATED with legend creation"""
